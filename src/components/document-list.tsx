@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   Table,
   TableBody,
@@ -18,7 +18,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { FileText, Download, Eye, Trash2, Package, Ship, Calendar, Search, Filter } from 'lucide-react'
+import { FileText, Download, Eye, Trash2, Package, Ship, Calendar, Search, Filter, ChevronDown, X, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useToast } from '@/components/ui/use-toast'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -80,6 +80,10 @@ export function DocumentList({ documents }: DocumentListProps) {
   const [isDeleting, setIsDeleting] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterField, setFilterField] = useState<string>('all')
+  const [expandedContainers, setExpandedContainers] = useState<string | null>(null)
+  const [viewerDoc, setViewerDoc] = useState<Document | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
   const { toast } = useToast()
   const router = useRouter()
 
@@ -208,6 +212,36 @@ export function DocumentList({ documents }: DocumentListProps) {
     }
   }
 
+  // Add page navigation handler
+  const handlePageChange = (iframe: HTMLIFrameElement | null, direction: 'prev' | 'next') => {
+    if (!iframe?.contentWindow) return
+    
+    const message = direction === 'next' ? 'pdf-next-page' : 'pdf-prev-page'
+    iframe.contentWindow.postMessage(message, '*')
+  }
+
+  // Add message listener for PDF page updates
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data.type === 'pdf-page-count') {
+        setTotalPages(event.data.pages)
+      } else if (event.data.type === 'pdf-page-change') {
+        setCurrentPage(event.data.page)
+      }
+    }
+
+    window.addEventListener('message', handleMessage)
+    return () => window.removeEventListener('message', handleMessage)
+  }, [])
+
+  // Reset page count when opening a new document
+  useEffect(() => {
+    if (viewerDoc) {
+      setCurrentPage(1)
+      setTotalPages(1)
+    }
+  }, [viewerDoc])
+
   if (documents.length === 0) {
     return (
       <div className="text-center py-12">
@@ -277,20 +311,27 @@ export function DocumentList({ documents }: DocumentListProps) {
               }}
             >
               <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-lg">BOL #{bolNumber}</CardTitle>
-                  <CardDescription>
-                    {docs[0].bolData?.vessel && `Vessel: ${docs[0].bolData.vessel}`}
-                    {docs[0].bolData?.dateOfIssue && ` • Date: ${docs[0].bolData.dateOfIssue}`}
-                  </CardDescription>
+                <div className="flex items-center gap-2">
+                  <ChevronDown 
+                    className={`h-5 w-5 transition-transform duration-200 ${
+                      selectedDoc?.id === docs[0].id ? 'transform rotate-180' : ''
+                    }`}
+                  />
+                  <div>
+                    <CardTitle className="text-lg">BOL #{bolNumber}</CardTitle>
+                    <CardDescription>
+                      {docs[0].bolData?.vessel && `Vessel: ${docs[0].bolData.vessel}`}
+                      {docs[0].bolData?.dateOfIssue && ` • Date: ${docs[0].bolData.dateOfIssue}`}
+                    </CardDescription>
+                  </div>
                 </div>
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center gap-2">
                   <Button
                     variant="ghost"
                     size="icon"
                     onClick={(e) => {
                       e.stopPropagation()
-                      window.open(`/api/documents/${docs[0].id}/view`, '_blank')
+                      setViewerDoc(docs[0])
                     }}
                   >
                     <Eye className="h-4 w-4" />
@@ -351,31 +392,50 @@ export function DocumentList({ documents }: DocumentListProps) {
                   </div>
 
                   <div>
-                    <h4 className="font-semibold mb-2">Containers ({docs[0].bolData?.totalContainers})</h4>
-                    <div className="overflow-x-auto">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Container</TableHead>
-                            <TableHead>Seal</TableHead>
-                            <TableHead>Description</TableHead>
-                            <TableHead className="text-right">Quantity</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {docs[0].items?.map((item) => (
-                            <TableRow key={item.containerNumber}>
-                              <TableCell>{item.containerNumber}</TableCell>
-                              <TableCell>{item.seal}</TableCell>
-                              <TableCell>{item.description}</TableCell>
-                              <TableCell className="text-right">
-                                {item.quantity.litros} L / {item.quantity.kg} kg
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
+                    <div 
+                      className="flex items-center gap-2 cursor-pointer hover:bg-accent rounded-md p-2"
+                      onClick={() => {
+                        if (expandedContainers === docs[0].id) {
+                          setExpandedContainers(null)
+                        } else {
+                          setExpandedContainers(docs[0].id)
+                        }
+                      }}
+                    >
+                      <ChevronDown 
+                        className={`h-5 w-5 transition-transform duration-200 ${
+                          expandedContainers === docs[0].id ? 'transform rotate-180' : ''
+                        }`}
+                      />
+                      <h4 className="font-semibold">Containers ({docs[0].bolData?.totalContainers})</h4>
                     </div>
+                    
+                    {expandedContainers === docs[0].id && (
+                      <div className="overflow-x-auto mt-2">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Container</TableHead>
+                              <TableHead>Seal</TableHead>
+                              <TableHead>Description</TableHead>
+                              <TableHead className="text-right">Quantity</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {docs[0].items?.map((item) => (
+                              <TableRow key={item.containerNumber}>
+                                <TableCell>{item.containerNumber}</TableCell>
+                                <TableCell>{item.seal}</TableCell>
+                                <TableCell>{item.description}</TableCell>
+                                <TableCell className="text-right">
+                                  {item.quantity.litros} L / {item.quantity.kg} kg
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -384,6 +444,29 @@ export function DocumentList({ documents }: DocumentListProps) {
         ))}
       </div>
 
+      {/* Document Viewer Dialog */}
+      <Dialog open={!!viewerDoc} onOpenChange={(open) => !open && setViewerDoc(null)}>
+        <DialogContent className="max-w-[98vw] w-[98vw] h-[98vh] resize rounded-lg overflow-hidden p-0">
+          <div className="flex flex-col h-full">
+            <div className="flex items-center justify-between px-2 py-1 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+              <DialogTitle className="text-xs font-medium">
+                BOL #{viewerDoc?.bolData?.bolNumber}
+              </DialogTitle>
+            </div>
+            <div className="flex-1 min-h-0 bg-white">
+              {viewerDoc && (
+                <embed
+                  src={`/api/documents/${viewerDoc.id}/view`}
+                  type="application/pdf"
+                  className="w-full h-full"
+                />
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
       <Dialog open={!!deleteDoc} onOpenChange={() => setDeleteDoc(null)}>
         <DialogContent>
           <DialogHeader>
