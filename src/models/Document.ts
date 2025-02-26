@@ -3,8 +3,7 @@ import mongoose, { Model } from 'mongoose'
 interface IDocument {
   clientId: mongoose.Types.ObjectId
   fileName: string
-  filePath: string
-  fileUrl: string
+  fileId: mongoose.Types.ObjectId  // GridFS file ID
   type: 'BOL' | 'PL'  // Adding PL type for Packing List
   packingListData?: {
     documentNumber: string  // e.g. "1092-PL"
@@ -55,12 +54,8 @@ const documentSchema = new mongoose.Schema<IDocument>({
     type: String,
     required: true
   },
-  filePath: {
-    type: String,
-    required: true
-  },
-  fileUrl: {
-    type: String,
+  fileId: {
+    type: mongoose.Schema.Types.ObjectId,
     required: true
   },
   type: {

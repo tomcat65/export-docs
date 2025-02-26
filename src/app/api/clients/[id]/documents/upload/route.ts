@@ -3,11 +3,9 @@ import { auth } from '@/lib/auth'
 import { connectDB } from '@/lib/db'
 import { Client } from '@/models/Client'
 import { Document } from '@/models/Document'
-import { writeFile } from 'fs/promises'
-import { join } from 'path'
-import { mkdir } from 'fs/promises'
 import { processDocumentWithClaude } from '@/lib/claude'
-import { unlink } from 'fs/promises'
+import mongoose from 'mongoose'
+import { Readable } from 'stream'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -20,8 +18,6 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<RouteParams> }
 ) {
-  let fileName: string | undefined
-
   try {
     // Check authentication
     const session = await auth()
@@ -50,32 +46,63 @@ export async function POST(
 
     const documentData = JSON.parse(documentStr) as { type: 'pdf' | 'image'; data: string }
 
+    let uploadStream: any
+    let bucket: any
+
     try {
-      // Create uploads directory if it doesn't exist
-      const uploadsDir = join(process.cwd(), 'public', 'uploads', id)
-      await mkdir(uploadsDir, { recursive: true })
+      // Store file in MongoDB GridFS
+      const db = mongoose.connection.db
+      if (!db) {
+        throw new Error('Database connection not established')
+      }
+      
+      bucket = new mongoose.mongo.GridFSBucket(db, {
+        bucketName: 'documents'
+      })
 
-      // Save file
+      // Create a buffer from the file
       const buffer = Buffer.from(await file.arrayBuffer())
-      fileName = join(uploadsDir, file.name)
-      await writeFile(fileName, buffer)
+      
+      // Create a readable stream from the buffer
+      const readableStream = Readable.from(buffer)
 
-      // Create relative URL for file access
-      const fileUrl = `/uploads/${id}/${file.name}`
+      // Upload to GridFS
+      uploadStream = bucket.openUploadStream(file.name, {
+        metadata: {
+          clientId: id,
+          contentType: file.type,
+          uploadedBy: session.user.email,
+          uploadedAt: new Date()
+        }
+      })
+
+      // Wait for the upload to complete
+      await new Promise((resolve, reject) => {
+        readableStream
+          .pipe(uploadStream)
+          .on('error', reject)
+          .on('finish', resolve)
+      })
 
       // Process document with Claude
       const processedData = await processDocumentWithClaude(documentData)
       
       if (!processedData || !processedData.shipmentDetails || !processedData.shipmentDetails.bolNumber) {
+        console.error('Failed to extract required information:', processedData)
         throw new Error('Failed to extract required information from document')
+      }
+
+      // Validate container data
+      if (!Array.isArray(processedData.containers) || processedData.containers.length === 0) {
+        console.error('No containers found in processed data')
+        throw new Error('No container information found in document')
       }
 
       // Map the processed data to our document schema
       const dbDocumentData = {
         clientId: id,
         fileName: file.name,
-        filePath: fileName,
-        fileUrl,
+        fileId: uploadStream.id, // Store the GridFS file ID instead of file path
         type: 'BOL' as const,
         items: processedData.containers.map((container, index) => ({
           itemNumber: index + 1,
@@ -112,6 +139,10 @@ export async function POST(
       })
 
       if (existingDocument) {
+        // If updating, delete the old file from GridFS
+        if (existingDocument.fileId) {
+          await bucket.delete(new mongoose.Types.ObjectId(existingDocument.fileId))
+        }
         // Update existing document
         existingDocument.set(dbDocumentData)
         await existingDocument.save()
@@ -131,22 +162,29 @@ export async function POST(
         success: true,
         document: {
           id: existingDocument._id,
-          fileUrl: existingDocument.fileUrl,
           bolData: existingDocument.bolData,
           items: existingDocument.items
         }
       })
     } catch (error) {
-      console.error('Error saving file or processing document:', error)
-      // Delete the file if it was created
-      if (fileName) {
+      console.error('Error processing document:', error)
+      
+      // Delete the uploaded file from GridFS if it exists
+      if (uploadStream?.id) {
         try {
-          await unlink(fileName)
-        } catch (unlinkError) {
-          console.error('Error deleting file:', unlinkError)
+          await bucket.delete(uploadStream.id)
+        } catch (deleteError) {
+          console.error('Error deleting failed upload:', deleteError)
         }
       }
-      throw error
+
+      return NextResponse.json(
+        { 
+          error: error instanceof Error ? error.message : 'Failed to save document',
+          details: error instanceof Error ? error.stack : undefined
+        },
+        { status: 500 }
+      )
     }
   } catch (error) {
     console.error('Error processing document:', error)

@@ -409,7 +409,15 @@ export function DocumentList({ documents }: DocumentListProps) {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => window.open(docs[0].fileName, '_blank')}
+                onClick={() => window.open(`/api/documents/${docs[0].id}/view`, '_blank')}
+              >
+                <Eye className="h-4 w-4 mr-2" />
+                View Document
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.open(`/api/documents/${docs[0].id}/download`, '_blank')}
               >
                 <Download className="h-4 w-4 mr-2" />
                 Download BOL

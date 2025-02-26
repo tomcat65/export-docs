@@ -32,6 +32,7 @@ interface ProcessedDocument {
     portOfDischarge: string
     dateOfIssue: string
     shipmentDate: string
+    totalContainers?: string
   }
   parties: {
     shipper: {
@@ -94,7 +95,7 @@ async function callClaudeWithRetry(
 
     const message = await anthropic.messages.create({
       model: 'claude-3-7-sonnet-20250219',
-      max_tokens: 1024,
+      max_tokens: 4096,
       temperature: 0,
       system: systemPrompt,
       messages: [
@@ -103,7 +104,7 @@ async function callClaudeWithRetry(
           content: [
             {
               type: 'text',
-              text: userPrompt
+              text: userPrompt + "\n\nIMPORTANT: Make sure to include ALL containers in the response. If there are more than 5 containers, DO NOT truncate the response. Process ALL pages of the document."
             },
             contentBlock
           ]
@@ -118,9 +119,19 @@ async function callClaudeWithRetry(
       error.status === 500 || // Internal Server Error
       error.status === 503 || // Service Unavailable
       error.message?.includes('overloaded') ||
-      error.type === 'overloaded_error'
+      error.message?.includes('token limit') ||
+      error.type === 'overloaded_error' ||
+      error.type === 'token_limit_error'
     )) {
       console.log(`Retry attempt ${retryCount + 1} after error:`, error.message)
+      
+      // If we hit token limits, try with a more focused prompt
+      if (error.message?.includes('token limit') || error.type === 'token_limit_error') {
+        console.log('Token limit reached, retrying with focused prompt')
+        const focusedPrompt = `${userPrompt}\n\nFOCUS ON EXTRACTING:\n1. BOL number and basic shipment details\n2. ALL container numbers, seals, and quantities\n3. Process every page thoroughly\n4. Do not skip any containers`
+        return callClaudeWithRetry(systemPrompt, focusedPrompt, document, retryCount + 1)
+      }
+      
       await sleep(RETRY_DELAY * Math.pow(2, retryCount)) // Exponential backoff
       return callClaudeWithRetry(systemPrompt, userPrompt, document, retryCount + 1)
     }
@@ -136,9 +147,10 @@ export async function processDocumentWithClaude(
     console.log(`Processing ${document.type} document`)
     
     const systemPrompt = `You are a logistics document parser specializing in Bills of Lading (BOL).
-Your task is to analyze the provided Bill of Lading ${document.type} and extract specific information in a structured JSON format.
+Your task is to analyze ALL PAGES of the provided Bill of Lading ${document.type} and extract specific information in a structured JSON format.
 
 CRITICAL RULES:
+- IMPORTANT: Read and analyze ALL PAGES of the document thoroughly
 - Extract ALL information EXACTLY as shown in the document
 - For the BOL number, use ONLY the number shown in "B/L No." field
 - Convert measurements to all requested units
@@ -147,15 +159,24 @@ CRITICAL RULES:
 - Use 0 for missing numerical values
 - Preserve exact formatting of numbers, dates, and identifiers
 - Return ONLY the JSON object, no additional text or explanations
+- If information spans multiple pages, combine it appropriately
+- For container details, check ALL pages as they often continue across pages
 
 Pay special attention to:
 1. The document header for BOL number, vessel details, and dates
-2. The "PARTICULARS FURNISHED BY SHIPPER" section for container details
-3. The shipper, consignee, and notify party sections for complete address information`
+2. ALL pages of the "PARTICULARS FURNISHED BY SHIPPER" section for complete container details
+3. The shipper, consignee, and notify party sections for complete address information
+4. Any continuation pages that may contain additional container or cargo details`
 
-    const userPrompt = `I'm providing you with a Bill of Lading document.
-Please analyze it and extract the information into the following JSON structure.
-Pay special attention to the "PARTICULARS FURNISHED BY SHIPPER" section for container details.
+    const userPrompt = `I'm providing you with a Bill of Lading document that may have multiple pages.
+Please analyze ALL PAGES thoroughly and extract the information into the following JSON structure.
+Pay special attention to container details that may span multiple pages.
+
+IMPORTANT: Make sure to:
+1. Read and analyze every page of the document
+2. Combine information that spans across pages
+3. Include ALL containers and their details from ALL pages
+4. Verify totals match the sum of all items across all pages
 
 Return this EXACT JSON structure with the values found:
 {
@@ -240,6 +261,11 @@ Return this EXACT JSON structure with the values found:
         jsonStr = jsonMatch[0]
       }
 
+      // Check for incomplete JSON response
+      if (!jsonStr.includes('"commercial"') || !jsonStr.includes('"containers"')) {
+        throw new Error('Incomplete JSON response - missing required sections')
+      }
+
       // Parse the JSON and validate required fields
       const data = JSON.parse(jsonStr) as ProcessedDocument
       
@@ -275,6 +301,11 @@ Return this EXACT JSON structure with the values found:
           throw new Error(`Missing product information in container ${index + 1}`)
         }
       })
+
+      // Additional validation for container count
+      if (data.containers.length < parseInt(data.shipmentDetails.totalContainers || '0')) {
+        throw new Error(`Missing containers: found ${data.containers.length} but expected ${data.shipmentDetails.totalContainers}`)
+      }
 
       // Trim whitespace from string fields
       data.shipmentDetails.bolNumber = data.shipmentDetails.bolNumber.trim()
