@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { connectDB } from '@/lib/db'
 import { Document } from '@/models/Document'
-import { unlink } from 'fs/promises'
-import { join } from 'path'
+import mongoose from 'mongoose'
 
 export async function DELETE(
   request: NextRequest,
@@ -24,11 +23,14 @@ export async function DELETE(
       return NextResponse.json({ error: 'Document not found' }, { status: 404 })
     }
 
-    // Delete file from filesystem
+    // Delete file from GridFS
     try {
-      await unlink(document.filePath)
+      const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db!, {
+        bucketName: 'documents'
+      })
+      await bucket.delete(new mongoose.Types.ObjectId(document.fileId))
     } catch (error) {
-      console.error('Error deleting file:', error)
+      console.error('Error deleting file from GridFS:', error)
       // Continue with document deletion even if file deletion fails
     }
 
