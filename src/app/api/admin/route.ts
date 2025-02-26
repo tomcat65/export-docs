@@ -1,11 +1,11 @@
-import { getAuth } from '@/lib/auth'
+import { auth } from '@/lib/auth'
 import { connectDB } from '@/lib/db'
 import { AdminUser } from '@/models/AdminUser'
 import { NextResponse } from 'next/server'
 
 export async function GET() {
   try {
-    const session = await getAuth()
+    const session = await auth()
     
     if (!session?.user?.isAdmin) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -23,7 +23,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const session = await getAuth()
+    const session = await auth()
     
     if (!session?.user?.isAdmin) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -57,7 +57,7 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    const session = await getAuth()
+    const session = await auth()
     
     if (!session?.user?.isAdmin) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

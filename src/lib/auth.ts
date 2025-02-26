@@ -1,9 +1,10 @@
-import { NextAuthOptions, getServerSession } from 'next-auth'
+import NextAuth from 'next-auth'
 import GoogleProvider from 'next-auth/providers/google'
+import { getServerSession } from 'next-auth'
 import { connectDB } from './db'
 import { AdminUser } from '@/models/AdminUser'
 
-export const authOptions: NextAuthOptions = {
+export const authOptions = {
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID || '',
@@ -54,4 +55,4 @@ export const authOptions: NextAuthOptions = {
   }
 }
 
-export const getAuth = () => getServerSession(authOptions) 
+export const auth = () => getServerSession(authOptions) 

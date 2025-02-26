@@ -1,65 +1,78 @@
-import { getAuth } from '@/lib/auth'
+import { NextRequest } from 'next/server'
+import { auth } from '@/lib/auth'
 import { connectDB } from '@/lib/db'
 import { Client } from '@/models/Client'
-import { NextResponse } from 'next/server'
+import { z } from 'zod'
+
+const clientSchema = z.object({
+  name: z.string().min(1, 'Company name is required'),
+  rif: z.string().min(1, 'RIF is required')
+})
 
 export async function GET() {
   try {
-    console.log('Checking auth...')
-    const session = await getAuth()
-    
+    const session = await auth()
     if (!session?.user?.isAdmin) {
-      console.log('Unauthorized access attempt')
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return Response.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    console.log('Connecting to MongoDB...')
     await connectDB()
-    console.log('Successfully connected to MongoDB')
-    
-    const clients = await Client.find({}).sort({ name: 1 })
-    console.log('Found clients:', clients)
-    
-    return NextResponse.json(clients)
+    const clients = await Client.find({}).sort({ name: 1 }).lean()
+
+    return Response.json(clients.map(client => ({
+      id: client._id.toString(),
+      name: client.name,
+      rif: client.rif,
+      lastDocument: client.lastDocument
+    })))
   } catch (error) {
-    console.error('Error in /api/clients:', error)
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
+    console.error('Error fetching clients:', error)
+    return Response.json(
+      { error: 'Failed to fetch clients' },
+      { status: 500 }
+    )
   }
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const session = await getAuth()
-    
+    const session = await auth()
     if (!session?.user?.isAdmin) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return Response.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const body = await request.json()
-    const { name, rif, address, contact, requiredDocuments } = body
-
-    if (!name || !rif || !address) {
-      return NextResponse.json({ error: 'Name, RIF, and address are required' }, { status: 400 })
-    }
+    const validatedData = clientSchema.parse(body)
 
     await connectDB()
-    
-    const existingClient = await Client.findOne({ rif: rif.trim().toUpperCase() })
+
+    // Check if client with RIF already exists
+    const existingClient = await Client.findOne({ rif: validatedData.rif })
     if (existingClient) {
-      return NextResponse.json({ error: 'Client with this RIF already exists' }, { status: 400 })
+      return Response.json(
+        { error: 'A client with this RIF already exists' },
+        { status: 400 }
+      )
     }
 
-    const newClient = await Client.create({
-      name: name.trim(),
-      rif: rif.trim().toUpperCase(),
-      address: address.trim(),
-      contact,
-      requiredDocuments
-    })
+    const client = await Client.create(validatedData)
 
-    return NextResponse.json(newClient)
+    return Response.json({
+      id: client._id.toString(),
+      name: client.name,
+      rif: client.rif
+    })
   } catch (error) {
     console.error('Error creating client:', error)
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
+    if (error instanceof z.ZodError) {
+      return Response.json(
+        { error: 'Invalid client data', details: error.errors },
+        { status: 400 }
+      )
+    }
+    return Response.json(
+      { error: 'Failed to create client' },
+      { status: 500 }
+    )
   }
 } 

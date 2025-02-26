@@ -1,4 +1,4 @@
-import { getAuth } from '@/lib/auth'
+import { auth } from '@/lib/auth'
 import { connectDB } from '@/lib/db'
 import { Client } from '@/models/Client'
 import { NextRequest, NextResponse } from 'next/server'
@@ -10,7 +10,7 @@ export async function GET(
   const id = params.id
   try {
     console.log('Checking auth...')
-    const session = await getAuth()
+    const session = await auth()
     
     if (!session?.user?.isAdmin) {
       console.log('Unauthorized access attempt')
@@ -41,7 +41,7 @@ export async function PUT(
 ) {
   const id = params.id
   try {
-    const session = await getAuth()
+    const session = await auth()
     
     if (!session?.user?.isAdmin) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

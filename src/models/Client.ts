@@ -1,38 +1,32 @@
 import mongoose from 'mongoose'
 
-const ClientSchema = new mongoose.Schema({
+const clientSchema = new mongoose.Schema({
   name: {
     type: String,
-    required: true,
+    required: [true, 'Company name is required'],
     trim: true
   },
   rif: {
     type: String,
-    required: true,
-    unique: true,
+    required: [true, 'RIF is required'],
     trim: true
   },
-  address: {
-    type: String,
-    required: true
-  },
-  contact: {
-    name: String,
-    email: String,
-    phone: String
-  },
-  requiredDocuments: [{
-    type: String,
-    enum: ['COO', 'COA', 'Invoice', 'PackingList', 'SED']
-  }],
-  createdAt: {
+  lastDocumentDate: {
     type: Date,
-    default: Date.now
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now
+    default: null
   }
+}, {
+  timestamps: true
 })
 
-export const Client = mongoose.models.Client || mongoose.model('Client', ClientSchema) 
+// Create indexes
+clientSchema.index({ name: 1 })
+
+// Update the updatedAt timestamp before saving
+clientSchema.pre('save', function(next) {
+  this.updatedAt = new Date()
+  next()
+})
+
+// Prevent mongoose from creating a new model if it already exists
+export const Client = mongoose.models.Client || mongoose.model('Client', clientSchema) 

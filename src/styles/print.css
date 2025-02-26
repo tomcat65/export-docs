@@ -1,0 +1,36 @@
+@media print {
+  /* Hide everything except the packing list */
+  body > *:not(.print-container) {
+    display: none !important;
+  }
+
+  .print-container {
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Ensure table fits on page */
+  table {
+    page-break-inside: auto;
+  }
+
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+
+  /* Remove shadows and borders */
+  .shadow-sm {
+    box-shadow: none !important;
+  }
+
+  /* Ensure black text for printing */
+  * {
+    color: black !important;
+  }
+
+  /* Hide print button when printing */
+  .print-button {
+    display: none !important;
+  }
+} 
