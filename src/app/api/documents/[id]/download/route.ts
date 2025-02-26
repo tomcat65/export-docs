@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // Check authentication
@@ -20,14 +20,22 @@ export async function GET(
 
     await connectDB()
 
+    // Get the ID from params
+    const { id } = await params
+
     // Find document
-    const document = await Document.findById(params.id)
+    const document = await Document.findById(id)
     if (!document) {
       return new NextResponse('Document not found', { status: 404 })
     }
 
     // Get file from GridFS
-    const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
+    const db = mongoose.connection.db
+    if (!db) {
+      return new NextResponse('Database connection not established', { status: 500 })
+    }
+
+    const bucket = new mongoose.mongo.GridFSBucket(db, {
       bucketName: 'documents'
     })
 
