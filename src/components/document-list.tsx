@@ -254,186 +254,135 @@ export function DocumentList({ documents }: DocumentListProps) {
               <SelectContent>
                 <SelectItem value="all">All Fields</SelectItem>
                 <SelectItem value="bolNumber">BOL Number</SelectItem>
-                <SelectItem value="container">Container Number</SelectItem>
-                <SelectItem value="description">Item Description</SelectItem>
-                <SelectItem value="date">Shipment Date</SelectItem>
+                <SelectItem value="container">Container</SelectItem>
+                <SelectItem value="description">Description</SelectItem>
+                <SelectItem value="date">Date</SelectItem>
               </SelectContent>
             </Select>
-          </div>
-
-          {/* Quick Filters */}
-          <div className="mt-4">
-            <h4 className="text-sm font-medium mb-2">Quick Filters:</h4>
-            <div className="flex flex-wrap gap-2">
-              {filterField === 'description' && filterOptions.descriptions.map(desc => (
-                <Button
-                  key={desc}
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setSearchTerm(desc)}
-                >
-                  {desc}
-                </Button>
-              ))}
-              {filterField === 'container' && filterOptions.containers.map(container => (
-                <Button
-                  key={container}
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setSearchTerm(container)}
-                >
-                  {container}
-                </Button>
-              ))}
-              {filterField === 'date' && filterOptions.dates.map(date => (
-                <Button
-                  key={date}
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setSearchTerm(date)}
-                >
-                  {date}
-                </Button>
-              ))}
-              {filterField === 'bolNumber' && filterOptions.bolNumbers.map(bol => (
-                <Button
-                  key={bol}
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setSearchTerm(bol)}
-                >
-                  {bol}
-                </Button>
-              ))}
-            </div>
-          </div>
-
-          {/* Results Summary */}
-          <div className="mt-4 text-sm text-muted-foreground">
-            Found {filteredDocuments.length} matching documents
           </div>
         </CardContent>
       </Card>
 
-      {groupedDocuments.map(([bolNumber, docs]) => (
-        <Card key={bolNumber} className="mb-8">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-xl">BOL Number: {bolNumber}</CardTitle>
-                {docs[0].bolData?.bookingNumber && (
+      <div className="space-y-4">
+        {groupedDocuments.map(([bolNumber, docs]) => (
+          <Card key={bolNumber} className="overflow-hidden">
+            <CardHeader 
+              className="cursor-pointer hover:bg-accent"
+              onClick={() => {
+                if (selectedDoc?.id === docs[0].id) {
+                  setSelectedDoc(null)
+                } else {
+                  setSelectedDoc(docs[0])
+                }
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-lg">BOL #{bolNumber}</CardTitle>
                   <CardDescription>
-                    Booking: {docs[0].bolData.bookingNumber}
+                    {docs[0].bolData?.vessel && `Vessel: ${docs[0].bolData.vessel}`}
+                    {docs[0].bolData?.dateOfIssue && ` • Date: ${docs[0].bolData.dateOfIssue}`}
                   </CardDescription>
-                )}
-              </div>
-              <div className="flex items-center space-x-4">
-                <div className="text-sm text-muted-foreground">
-                  <Ship className="inline-block h-4 w-4 mr-1" />
-                  {docs[0].bolData?.vessel || 'N/A'}
                 </div>
-                <div className="text-sm text-muted-foreground">
-                  <Calendar className="inline-block h-4 w-4 mr-1" />
-                  {docs[0].bolData?.dateOfIssue || 'N/A'}
+                <div className="flex items-center space-x-2">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      window.open(`/api/documents/${docs[0].id}/view`, '_blank')
+                    }}
+                  >
+                    <Eye className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      window.open(`/api/documents/${docs[0].id}/download`, '_blank')
+                    }}
+                  >
+                    <Download className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleDelete(docs[0])
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
               </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              <div>
-                <h4 className="font-medium mb-2">Shipping Details</h4>
-                <dl className="space-y-1">
-                  <div className="flex justify-between">
-                    <dt className="text-sm text-muted-foreground">Shipper</dt>
-                    <dd className="text-sm font-medium">{docs[0].bolData?.shipper}</dd>
-                  </div>
-                  <div className="flex justify-between">
-                    <dt className="text-sm text-muted-foreground">Port of Loading</dt>
-                    <dd className="text-sm font-medium">{docs[0].bolData?.portOfLoading}</dd>
-                  </div>
-                  <div className="flex justify-between">
-                    <dt className="text-sm text-muted-foreground">Port of Discharge</dt>
-                    <dd className="text-sm font-medium">{docs[0].bolData?.portOfDischarge}</dd>
-                  </div>
-                </dl>
-              </div>
-              <div>
-                <h4 className="font-medium mb-2">Cargo Summary</h4>
-                <dl className="space-y-1">
-                  <div className="flex justify-between">
-                    <dt className="text-sm text-muted-foreground">Total Containers</dt>
-                    <dd className="text-sm font-medium">{docs[0].bolData?.totalContainers}</dd>
-                  </div>
-                  <div className="flex justify-between">
-                    <dt className="text-sm text-muted-foreground">Total Weight (KG)</dt>
-                    <dd className="text-sm font-medium">{docs[0].bolData?.totalWeight.kg}</dd>
-                  </div>
-                  <div className="flex justify-between">
-                    <dt className="text-sm text-muted-foreground">Total Weight (LBS)</dt>
-                    <dd className="text-sm font-medium">{docs[0].bolData?.totalWeight.lbs}</dd>
-                  </div>
-                </dl>
-              </div>
-            </div>
+            </CardHeader>
 
-            <div className="mt-6">
-              <h4 className="font-medium mb-4">Container Details</h4>
-              <div className="rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Container</TableHead>
-                      <TableHead>Seal</TableHead>
-                      <TableHead>Description</TableHead>
-                      <TableHead className="text-right">Litros</TableHead>
-                      <TableHead className="text-right">KG</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {docs[0].items?.map((item) => (
-                      <TableRow key={item.containerNumber}>
-                        <TableCell className="font-medium">{item.containerNumber}</TableCell>
-                        <TableCell>{item.seal}</TableCell>
-                        <TableCell>{item.description}</TableCell>
-                        <TableCell className="text-right">{item.quantity.litros}</TableCell>
-                        <TableCell className="text-right">{item.quantity.kg}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
+            {selectedDoc?.id === docs[0].id && (
+              <CardContent className="border-t">
+                <div className="space-y-4 py-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <h4 className="font-semibold mb-2">Shipping Details</h4>
+                      <dl className="space-y-1">
+                        <div className="flex">
+                          <dt className="w-32 text-muted-foreground">Booking:</dt>
+                          <dd>{docs[0].bolData?.bookingNumber || '-'}</dd>
+                        </div>
+                        <div className="flex">
+                          <dt className="w-32 text-muted-foreground">From:</dt>
+                          <dd>{docs[0].bolData?.portOfLoading}</dd>
+                        </div>
+                        <div className="flex">
+                          <dt className="w-32 text-muted-foreground">To:</dt>
+                          <dd>{docs[0].bolData?.portOfDischarge}</dd>
+                        </div>
+                        <div className="flex">
+                          <dt className="w-32 text-muted-foreground">Total Weight:</dt>
+                          <dd>{docs[0].bolData?.totalWeight.kg} kg</dd>
+                        </div>
+                      </dl>
+                    </div>
+                    <div>
+                      <h4 className="font-semibold mb-2">Shipper</h4>
+                      <p className="text-sm">{docs[0].bolData?.shipper}</p>
+                    </div>
+                  </div>
 
-            <div className="mt-6 flex justify-end space-x-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => window.open(`/api/documents/${docs[0].id}/view`, '_blank')}
-              >
-                <Eye className="h-4 w-4 mr-2" />
-                View Document
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => window.open(`/api/documents/${docs[0].id}/download`, '_blank')}
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Download BOL
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleDelete(docs[0])}
-              >
-                <Trash2 className="h-4 w-4 mr-2 text-red-500" />
-                Delete
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      ))}
+                  <div>
+                    <h4 className="font-semibold mb-2">Containers ({docs[0].bolData?.totalContainers})</h4>
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Container</TableHead>
+                            <TableHead>Seal</TableHead>
+                            <TableHead>Description</TableHead>
+                            <TableHead className="text-right">Quantity</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {docs[0].items?.map((item) => (
+                            <TableRow key={item.containerNumber}>
+                              <TableCell>{item.containerNumber}</TableCell>
+                              <TableCell>{item.seal}</TableCell>
+                              <TableCell>{item.description}</TableCell>
+                              <TableCell className="text-right">
+                                {item.quantity.litros} L / {item.quantity.kg} kg
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            )}
+          </Card>
+        ))}
+      </div>
 
       <Dialog open={!!deleteDoc} onOpenChange={() => setDeleteDoc(null)}>
         <DialogContent>

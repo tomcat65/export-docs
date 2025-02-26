@@ -14,10 +14,48 @@ interface RouteParams {
   id: string
 }
 
+// Helper function to clean up old files
+async function cleanupOldFiles(bucket: any, fileName: string, bolNumber?: string) {
+  try {
+    // Find all files with the same name or associated with the same BOL number
+    const cursor = bucket.find({
+      $or: [
+        { filename: fileName },
+        { 'metadata.bolNumber': bolNumber }
+      ]
+    })
+    
+    const files = await cursor.toArray()
+    console.log(`Found ${files.length} files to clean up`)
+    
+    // Sort files by uploadedAt to keep the most recent
+    files.sort((a: { metadata?: { uploadedAt?: Date } }, b: { metadata?: { uploadedAt?: Date } }) => {
+      const dateA = new Date(a.metadata?.uploadedAt || 0)
+      const dateB = new Date(b.metadata?.uploadedAt || 0)
+      return dateB.getTime() - dateA.getTime()
+    })
+    
+    // Keep the most recent file, delete the rest
+    for (let i = 1; i < files.length; i++) {
+      try {
+        await bucket.delete(files[i]._id)
+        console.log(`Deleted duplicate file: ${files[i]._id}, uploaded at ${files[i].metadata?.uploadedAt}`)
+      } catch (error) {
+        console.error(`Failed to delete file ${files[i]._id}:`, error)
+      }
+    }
+  } catch (error) {
+    console.error('Error cleaning up old files:', error)
+  }
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<RouteParams> }
 ) {
+  let uploadStream: any
+  let bucket: any
+
   try {
     // Check authentication
     const session = await auth()
@@ -46,9 +84,6 @@ export async function POST(
 
     const documentData = JSON.parse(documentStr) as { type: 'pdf' | 'image'; data: string }
 
-    let uploadStream: any
-    let bucket: any
-
     try {
       // Store file in MongoDB GridFS
       const db = mongoose.connection.db
@@ -59,6 +94,9 @@ export async function POST(
       bucket = new mongoose.mongo.GridFSBucket(db, {
         bucketName: 'documents'
       })
+
+      // Clean up any existing files with the same name before uploading
+      await cleanupOldFiles(bucket, file.name)
 
       // Create a buffer from the file
       const buffer = Buffer.from(await file.arrayBuffer())
@@ -72,7 +110,8 @@ export async function POST(
           clientId: id,
           contentType: file.type,
           uploadedBy: session.user.email,
-          uploadedAt: new Date()
+          uploadedAt: new Date(),
+          fileName: file.name
         }
       })
 
@@ -92,6 +131,9 @@ export async function POST(
         throw new Error('Failed to extract required information from document')
       }
 
+      // Clean up any existing files with the same BOL number
+      await cleanupOldFiles(bucket, file.name, processedData.shipmentDetails.bolNumber)
+
       // Validate container data
       if (!Array.isArray(processedData.containers) || processedData.containers.length === 0) {
         console.error('No containers found in processed data')
@@ -102,7 +144,7 @@ export async function POST(
       const dbDocumentData = {
         clientId: id,
         fileName: file.name,
-        fileId: uploadStream.id, // Store the GridFS file ID instead of file path
+        fileId: uploadStream.id,
         type: 'BOL' as const,
         items: processedData.containers.map((container, index) => ({
           itemNumber: index + 1,
@@ -141,7 +183,12 @@ export async function POST(
       if (existingDocument) {
         // If updating, delete the old file from GridFS
         if (existingDocument.fileId) {
-          await bucket.delete(new mongoose.Types.ObjectId(existingDocument.fileId))
+          try {
+            await bucket.delete(new mongoose.Types.ObjectId(existingDocument.fileId))
+            console.log('Deleted old file:', existingDocument.fileId)
+          } catch (error) {
+            console.error('Error deleting old file:', error)
+          }
         }
         // Update existing document
         existingDocument.set(dbDocumentData)
@@ -173,18 +220,13 @@ export async function POST(
       if (uploadStream?.id) {
         try {
           await bucket.delete(uploadStream.id)
+          console.log('Deleted failed upload:', uploadStream.id)
         } catch (deleteError) {
           console.error('Error deleting failed upload:', deleteError)
         }
       }
 
-      return NextResponse.json(
-        { 
-          error: error instanceof Error ? error.message : 'Failed to save document',
-          details: error instanceof Error ? error.stack : undefined
-        },
-        { status: 500 }
-      )
+      throw error
     }
   } catch (error) {
     console.error('Error processing document:', error)
