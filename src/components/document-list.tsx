@@ -64,6 +64,10 @@ interface BolData {
   }
   containers?: Container[]
   items?: Item[]
+  totalWeight?: {
+    kg: number
+    lbs: number
+  }
 }
 
 interface Document {
@@ -349,7 +353,7 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
                         className="flex justify-between items-center cursor-pointer hover:bg-muted/50 p-2 rounded-md transition-colors"
                         onClick={(e) => toggleShipmentDetails(e, bolNumber)}
                       >
-                        <h3 className="font-medium">Shipment details</h3>
+                        <h3 className="font-medium">Shipping Details</h3>
                         {isShipmentDetailsExpanded ? (
                           <ChevronUp className="h-4 w-4" />
                         ) : (
@@ -359,6 +363,30 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
                       
                       {isShipmentDetailsExpanded && (
                         <div className="mt-2 pl-2">
+                          {/* Display Port of Loading, Port of Discharge, and Total Weight */}
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                            <div>
+                              <p className="text-sm font-medium text-gray-500">Port of Loading</p>
+                              <p>{bolDoc.bolData?.portOfLoading || 'N/A'}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium text-gray-500">Port of Discharge</p>
+                              <p>{bolDoc.bolData?.portOfDischarge || 'N/A'}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium text-gray-500">Total Weight</p>
+                              <p>
+                                {bolDoc.bolData?.totalWeight ? 
+                                  `${bolDoc.bolData.totalWeight.kg} kg / ${bolDoc.bolData.totalWeight.lbs} lbs` :
+                                  bolDoc.bolData?.containers ? 
+                                    bolDoc.bolData.containers.reduce((sum, container) => sum + (container.grossWeight || 0), 0) + 
+                                    ' ' + (bolDoc.bolData.containers[0]?.weightUnit || 'kg')
+                                    : 'N/A'}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Existing Items Table */}
                           {bolDoc.items && bolDoc.items.length > 0 ? (
                             <Table>
                               <TableHeader>
@@ -415,7 +443,9 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
                     {/* Container Details Section */}
                     {bolDoc.bolData?.containers && bolDoc.bolData.containers.length > 0 && (
                       <div>
-                        <h3 className="text-lg font-semibold mb-2">Container Details</h3>
+                        <h3 className="text-lg font-semibold mb-2">
+                          Containers ({bolDoc.bolData.containers.length})
+                        </h3>
                         <div className="overflow-x-auto">
                           <table className="min-w-full divide-y divide-gray-200">
                             <thead className="bg-gray-50">
