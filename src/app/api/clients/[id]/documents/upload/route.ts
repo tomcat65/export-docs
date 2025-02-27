@@ -49,6 +49,32 @@ async function cleanupOldFiles(bucket: any, fileName: string, bolNumber?: string
   }
 }
 
+// Utility function to clean product descriptions
+function cleanProductDescription(description: string): string {
+  if (!description) return '';
+  
+  // Remove common phrases that precede the actual product description
+  const phrasesToRemove = [
+    /^\d+\s+container(?:s)?\s+said\s+to\s+contain\s+/i,
+    /^\d+\s+container(?:s)?\s+containing\s+/i,
+    /^said\s+to\s+contain\s+/i,
+    /^container(?:s)?\s+with\s+/i,
+    /^container(?:s)?\s+containing\s+/i,
+    /^containing\s+/i,
+    /^content(?:s)?:\s+/i
+  ];
+  
+  let cleanedDescription = description;
+  
+  // Apply each regex pattern to remove unwanted phrases
+  phrasesToRemove.forEach(pattern => {
+    cleanedDescription = cleanedDescription.replace(pattern, '');
+  });
+  
+  // Trim any extra whitespace
+  return cleanedDescription.trim();
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<RouteParams> }
@@ -150,7 +176,7 @@ export async function POST(
           itemNumber: index + 1,
           containerNumber: container.containerNumber,
           seal: container.sealNumber || '',
-          description: container.product.description,
+          description: cleanProductDescription(container.product.description),
           quantity: {
             litros: container.quantity.volume.liters.toFixed(2),
             kg: container.quantity.weight.kg.toFixed(3)

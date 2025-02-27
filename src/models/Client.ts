@@ -11,9 +11,26 @@ const clientSchema = new mongoose.Schema({
     required: [true, 'RIF is required'],
     trim: true
   },
+  address: {
+    type: String,
+    required: false,
+    trim: true
+  },
+  contact: {
+    type: Object,
+    required: false
+  },
+  requiredDocuments: {
+    type: Array,
+    default: []
+  },
   lastDocumentDate: {
-    type: Date,
-    default: null
+    type: String,
+    required: false
+  },
+  __v: {
+    type: Number,
+    default: 0
   }
 }, {
   timestamps: true

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { connectDB } from '@/lib/db'
-import { Document } from '@/models/Document'
+import { Asset } from '@/models/Asset'
 import mongoose from 'mongoose'
 
 export const runtime = 'nodejs'
@@ -20,16 +20,16 @@ export async function GET(
 
     await connectDB()
 
-    // Get document ID from params
+    // Get the ID from params
     const { id } = await params
     if (!id || id === 'undefined') {
-      return new NextResponse('Invalid document ID', { status: 400 })
+      return new NextResponse('Invalid asset ID', { status: 400 })
     }
 
-    // Find document
-    const document = await Document.findById(id)
-    if (!document) {
-      return new NextResponse('Document not found', { status: 404 })
+    // Find asset
+    const asset = await Asset.findById(id)
+    if (!asset) {
+      return new NextResponse('Asset not found', { status: 404 })
     }
 
     // Get file from GridFS
@@ -39,14 +39,14 @@ export async function GET(
     }
 
     const bucket = new mongoose.mongo.GridFSBucket(db, {
-      bucketName: 'documents'
+      bucketName: 'assets'
     })
 
     try {
       // Convert fileId to ObjectId if it's a string
-      const fileId = typeof document.fileId === 'string' 
-        ? new mongoose.Types.ObjectId(document.fileId)
-        : document.fileId;
+      const fileId = typeof asset.fileId === 'string' 
+        ? new mongoose.Types.ObjectId(asset.fileId)
+        : asset.fileId;
         
       const file = await bucket.find({ _id: fileId }).next()
       if (!file) {
@@ -57,7 +57,7 @@ export async function GET(
 
       return new Response(downloadStream as unknown as ReadableStream, {
         headers: {
-          'Content-Type': 'application/pdf',
+          'Content-Type': asset.contentType,
           'Content-Disposition': 'inline',
           'Cache-Control': 'no-cache'
         }
@@ -67,7 +67,7 @@ export async function GET(
       return new NextResponse('Error streaming file', { status: 500 })
     }
   } catch (error) {
-    console.error('Error in document view route:', error)
+    console.error('Error in asset view route:', error)
     return new NextResponse(
       'Error processing request',
       { status: 500 }

@@ -1,10 +1,11 @@
-import mongoose, { Model } from 'mongoose'
+import mongoose from 'mongoose'
 
 interface IDocument {
   clientId: mongoose.Types.ObjectId
   fileName: string
   fileId: mongoose.Types.ObjectId  // GridFS file ID
-  type: 'BOL' | 'PL'  // Adding PL type for Packing List
+  type: 'BOL' | 'PL' | 'COO'  // Adding COO type for Certificate of Origin
+  relatedBolId?: mongoose.Types.ObjectId  // Reference to original BOL document
   packingListData?: {
     documentNumber: string  // e.g. "1092-PL"
     date: string           // e.g. "12/26/2024"
@@ -16,7 +17,30 @@ interface IDocument {
       country: string     // e.g. "Venezuela"
     }
   }
-  items: Array<{
+  cooData?: {
+    certificateNumber: string
+    dateOfIssue: string
+    exporterInfo: {
+      name: string
+      address: string
+      taxId: string
+    }
+    importerInfo: {
+      name: string
+      address: string
+      taxId: string
+    }
+    productInfo: Array<{
+      description: string
+      hsCode: string
+      origin: string
+      quantity: {
+        value: number
+        unit: string
+      }
+    }>
+  }
+  items?: Array<{
     itemNumber: number        // Sequential number
     containerNumber: string   // e.g. "MRKU8922059"
     seal: string             // e.g. "26787-26788"
@@ -60,74 +84,79 @@ const documentSchema = new mongoose.Schema<IDocument>({
   },
   type: {
     type: String,
-    required: true,
-    enum: ['BOL', 'PL']
+    enum: ['BOL', 'PL', 'COO'],
+    required: true
+  },
+  relatedBolId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Document',
+    required: false
   },
   packingListData: {
-    type: {
-      documentNumber: String,
-      date: String,
-      address: {
-        company: String,
-        street: String,
-        details: String,
-        location: String,
-        country: String
-      }
-    },
-    required: false
+    documentNumber: String,
+    date: String,
+    address: {
+      company: String,
+      street: String,
+      details: String,
+      location: String,
+      country: String
+    }
   },
-  items: {
-    type: [{
-      _id: false,
-      itemNumber: { type: Number, required: true },
-      containerNumber: { type: String, required: true },
-      seal: { type: String, default: '' },
-      description: { type: String, required: true },
+  cooData: {
+    certificateNumber: String,
+    dateOfIssue: String,
+    exporterInfo: {
+      name: String,
+      address: String,
+      taxId: String
+    },
+    importerInfo: {
+      name: String,
+      address: String,
+      taxId: String
+    },
+    productInfo: [{
+      description: String,
+      hsCode: String,
+      origin: String,
       quantity: {
-        litros: { type: String, required: true },
-        kg: { type: String, required: true }
+        value: Number,
+        unit: String
       }
-    }],
-    required: true,
-    default: []
+    }]
   },
+  items: [{
+    itemNumber: Number,
+    containerNumber: String,
+    seal: String,
+    description: String,
+    quantity: {
+      litros: String,
+      kg: String
+    }
+  }],
   bolData: {
-    type: {
-      bolNumber: { type: String, required: true },
-      bookingNumber: String,
-      shipper: { type: String, required: true },
-      vessel: String,
-      portOfLoading: { type: String, required: true },
-      portOfDischarge: { type: String, required: true },
-      dateOfIssue: String,
-      totalContainers: { type: String, required: true },
-      totalWeight: {
-        kg: { type: String, required: true },
-        lbs: { type: String, required: true }
-      }
-    },
-    required: false
+    bolNumber: String,
+    bookingNumber: String,
+    shipper: String,
+    vessel: String,
+    portOfLoading: String,
+    portOfDischarge: String,
+    dateOfIssue: String,
+    totalContainers: String,
+    totalWeight: {
+      kg: String,
+      lbs: String
+    }
   }
 }, {
-  timestamps: true,
-  strict: true,
-  strictQuery: true // Add this to ensure strict querying
+  timestamps: true
 })
 
-// Force schema to be strict and remove any fields not in the schema
-documentSchema.set('strict', true)
+// Create indexes
+documentSchema.index({ clientId: 1, type: 1 })
+documentSchema.index({ 'bolData.bolNumber': 1 })
+documentSchema.index({ relatedBolId: 1 })
 
-// Update the updatedAt timestamp before saving
-documentSchema.pre('save', function(next) {
-  this.updatedAt = new Date()
-  next()
-})
-
-// Clear the model from mongoose's model cache
-mongoose.deleteModel(/Document/)
-
-// Create a new model with the updated schema
-const DocumentModel = mongoose.model<IDocument>('Document', documentSchema)
-
-export { DocumentModel as Document } 
+export const Document = mongoose.models.Document || mongoose.model<IDocument>('Document', documentSchema) 

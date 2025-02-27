@@ -3,7 +3,7 @@ import mongoose from 'mongoose'
 const MONGODB_URI = process.env.MONGODB_URI!
 
 if (!MONGODB_URI) {
-  throw new Error('Please define the MONGODB_URI environment variable inside .env')
+  throw new Error('Please define the MONGODB_URI environment variable inside .env.local')
 }
 
 let cached = global as any
@@ -24,6 +24,7 @@ export async function connectDB() {
     
     const opts = {
       bufferCommands: false,
+      dbName: 'docu-export' // Explicitly set the database name
     }
 
     cached.mongoose.promise = mongoose.connect(MONGODB_URI, opts)
@@ -32,7 +33,10 @@ export async function connectDB() {
   try {
     console.log('Awaiting database connection...')
     cached.mongoose.conn = await cached.mongoose.promise
-    console.log('Successfully connected to database')
+    console.log('Successfully connected to database:', {
+      db: cached.mongoose.conn.connection.db.databaseName,
+      collections: await cached.mongoose.conn.connection.db.listCollections().toArray()
+    })
   } catch (e) {
     console.error('Error connecting to database:', e)
     cached.mongoose.promise = null

@@ -5,9 +5,8 @@ import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = params.id
   try {
     console.log('Checking auth...')
     const session = await auth()
@@ -21,6 +20,7 @@ export async function GET(
     await connectDB()
     console.log('Successfully connected to MongoDB')
     
+    const { id } = await params
     const client = await Client.findById(id)
     console.log('Found client:', client)
     
@@ -37,9 +37,8 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = params.id
   try {
     const session = await auth()
     
@@ -47,6 +46,7 @@ export async function PUT(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    const { id } = await params
     const body = await request.json()
     const { name, rif, address, contact, requiredDocuments } = body
 

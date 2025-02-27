@@ -8,12 +8,13 @@ import { useSession } from 'next-auth/react'
 import Image from 'next/image'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/use-toast'
-import { Loader2, Trash2 } from 'lucide-react'
+import { Loader2, Trash2, FileImage } from 'lucide-react'
 import { useState } from 'react'
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard' },
-  { name: 'Clients', href: '/dashboard/clients' }
+  { name: 'Clients', href: '/dashboard/clients' },
+  { name: 'Assets', href: '/dashboard/assets', icon: FileImage }
 ]
 
 export function Header() {
@@ -66,10 +67,11 @@ export function Header() {
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  'transition-colors hover:text-foreground/80',
+                  'transition-colors hover:text-foreground/80 flex items-center',
                   pathname === item.href ? 'text-foreground' : 'text-foreground/60'
                 )}
               >
+                {item.icon && <item.icon className="w-4 h-4 mr-2" />}
                 {item.name}
               </Link>
             ))}

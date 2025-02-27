@@ -1,5 +1,4 @@
-import { auth } from '@/lib/auth'
-import { redirect } from 'next/navigation'
+import { getServerSession } from 'next-auth'
 import { Header } from '@/components/layout/header'
 import { Footer } from '@/components/layout/footer'
 
@@ -8,17 +7,15 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const session = await auth()
-  
-  if (!session?.user?.isAdmin) {
-    redirect('/login')
-  }
+  const session = await getServerSession()
 
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50">
+    <div className="min-h-screen flex flex-col bg-background">
       <Header />
-      <main className="container mx-auto py-6 px-4 flex-grow">
-        {children}
+      <main className="flex-1">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          {children}
+        </div>
       </main>
       <Footer />
     </div>

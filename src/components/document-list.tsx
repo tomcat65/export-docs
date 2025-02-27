@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   Table,
   TableBody,
@@ -10,54 +11,69 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog'
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { FileText, Download, Eye, Trash2, Package, Ship, Calendar, Search, Filter, ChevronDown, X, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Eye, FileText, Download, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
 import { useToast } from '@/components/ui/use-toast'
-import { useRouter } from 'next/navigation'
-import Link from 'next/link'
-import { PackingList } from '@/components/packing-list'
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { RelatedDocuments } from './related-documents'
+
+interface Container {
+  containerNumber: string
+  sealNumber: string
+  containerType: string
+  grossWeight: number
+  netWeight: number
+  weightUnit: string
+}
+
+interface Item {
+  description: string
+  quantity: number
+  unit: string
+  hsCode: string
+}
+
+interface BolData {
+  bolNumber: string
+  bookingNumber?: string
+  date?: string
+  dateOfIssue?: string
+  vessel?: string
+  voyage?: string
+  portOfLoading?: string
+  portOfDischarge?: string
+  placeOfReceipt?: string
+  placeOfDelivery?: string
+  consignee?: {
+    name: string
+    address: string
+  }
+  containers?: Container[]
+  items?: Item[]
+}
 
 interface Document {
-  id: string
+  _id: string
+  clientId: string
   fileName: string
-  type: string
-  createdAt: string
-  bolData?: {
-    bolNumber: string
-    bookingNumber?: string
-    shipper: string
-    vessel?: string
-    portOfLoading: string
-    portOfDischarge: string
-    dateOfIssue?: string
-    totalContainers: string
-    totalWeight: {
-      kg: string
-      lbs: string
-    }
-  }
+  fileId: string
+  type: 'BOL' | 'PL' | 'COO'
+  relatedBolId?: string
+  bolData?: BolData
   items?: Array<{
     itemNumber: number
     containerNumber: string
@@ -68,125 +84,127 @@ interface Document {
       kg: string
     }
   }>
+  createdAt: string
+  updatedAt: string
 }
 
 interface DocumentListProps {
+  clientId: string
   documents: Document[]
+  onDocumentDeleted?: () => void
 }
 
-export function DocumentList({ documents }: DocumentListProps) {
-  const [selectedDoc, setSelectedDoc] = useState<Document | null>(null)
-  const [deleteDoc, setDeleteDoc] = useState<Document | null>(null)
-  const [isDeleting, setIsDeleting] = useState(false)
-  const [searchTerm, setSearchTerm] = useState('')
-  const [filterField, setFilterField] = useState<string>('all')
-  const [expandedContainers, setExpandedContainers] = useState<string | null>(null)
-  const [viewerDoc, setViewerDoc] = useState<Document | null>(null)
-  const [currentPage, setCurrentPage] = useState(1)
-  const [totalPages, setTotalPages] = useState(1)
+export function DocumentList({ clientId, documents, onDocumentDeleted }: DocumentListProps) {
   const { toast } = useToast()
   const router = useRouter()
+  const [selectedDocument, setSelectedDocument] = useState<Document | null>(null)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [groupedDocuments, setGroupedDocuments] = useState<Record<string, Document[]>>({})
+  const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({})
+  const [expandedShipmentDetails, setExpandedShipmentDetails] = useState<Record<string, boolean>>({})
 
-  // Extract unique values for filter dropdowns
-  const filterOptions = useMemo(() => {
-    const options = {
-      descriptions: new Set<string>(),
-      containers: new Set<string>(),
-      dates: new Set<string>(),
-      bolNumbers: new Set<string>(),
-    }
-
+  useEffect(() => {
+    // Group documents by BOL number
+    const grouped: Record<string, Document[]> = {}
+    
+    // First, add all BOL documents
     documents.forEach(doc => {
-      if (doc.bolData?.bolNumber) {
-        options.bolNumbers.add(doc.bolData.bolNumber)
+      if (doc.type === 'BOL' && doc.bolData?.bolNumber) {
+        const bolNumber = doc.bolData.bolNumber
+        if (!grouped[bolNumber]) {
+          grouped[bolNumber] = []
+        }
+        grouped[bolNumber].push(doc)
       }
-      if (doc.bolData?.dateOfIssue) {
-        options.dates.add(doc.bolData.dateOfIssue)
-      }
-      doc.items?.forEach(item => {
-        options.descriptions.add(item.description)
-        options.containers.add(item.containerNumber)
-      })
     })
-
-    return {
-      descriptions: Array.from(options.descriptions).sort(),
-      containers: Array.from(options.containers).sort(),
-      dates: Array.from(options.dates).sort(),
-      bolNumbers: Array.from(options.bolNumbers).sort(),
+    
+    // Then add related documents
+    documents.forEach(doc => {
+      if (doc.type !== 'BOL' && doc.relatedBolId) {
+        // Find the BOL document
+        const bolDoc = documents.find(d => d._id === doc.relatedBolId)
+        if (bolDoc?.bolData?.bolNumber) {
+          const bolNumber = bolDoc.bolData.bolNumber
+          if (grouped[bolNumber]) {
+            grouped[bolNumber].push(doc)
+          }
+        }
+      }
+    })
+    
+    // Initialize expanded states
+    let initialExpandState: Record<string, boolean> = {}
+    let initialShipmentDetailsState: Record<string, boolean> = {}
+    
+    // Check if we should preserve the state from a refresh
+    const shouldPreserveState = sessionStorage.getItem('preserveDocumentListState') === 'true'
+    
+    if (shouldPreserveState) {
+      // Try to get saved states from sessionStorage
+      try {
+        const savedExpandedCards = sessionStorage.getItem('expandedCards')
+        const savedExpandedShipmentDetails = sessionStorage.getItem('expandedShipmentDetails')
+        
+        if (savedExpandedCards) {
+          initialExpandState = JSON.parse(savedExpandedCards)
+        }
+        
+        if (savedExpandedShipmentDetails) {
+          initialShipmentDetailsState = JSON.parse(savedExpandedShipmentDetails)
+        }
+        
+        // Clear the flag
+        sessionStorage.removeItem('preserveDocumentListState')
+      } catch (error) {
+        console.error('Error restoring document list state:', error)
+      }
     }
+    
+    // For any BOL numbers not in the saved state, initialize as collapsed
+    Object.keys(grouped).forEach(bolNumber => {
+      if (initialExpandState[bolNumber] === undefined) {
+        initialExpandState[bolNumber] = false
+      }
+      if (initialShipmentDetailsState[bolNumber] === undefined) {
+        initialShipmentDetailsState[bolNumber] = false
+      }
+    })
+    
+    setGroupedDocuments(grouped)
+    setExpandedCards(initialExpandState)
+    setExpandedShipmentDetails(initialShipmentDetailsState)
   }, [documents])
 
-  // Filter and search logic
-  const filteredDocuments = useMemo(() => {
-    if (!searchTerm && filterField === 'all') {
-      return documents
+  // Save state to sessionStorage when it changes
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('expandedCards', JSON.stringify(expandedCards))
+      sessionStorage.setItem('expandedShipmentDetails', JSON.stringify(expandedShipmentDetails))
+    } catch (error) {
+      console.error('Error saving document list state:', error)
     }
+  }, [expandedCards, expandedShipmentDetails])
 
-    return documents.filter(doc => {
-      const searchTermLower = searchTerm.toLowerCase()
-      
-      // Search in all fields if no specific filter is selected
-      if (filterField === 'all') {
-        return (
-          // Search in BOL data
-          doc.bolData?.bolNumber.toLowerCase().includes(searchTermLower) ||
-          doc.bolData?.bookingNumber?.toLowerCase().includes(searchTermLower) ||
-          doc.bolData?.vessel?.toLowerCase().includes(searchTermLower) ||
-          doc.bolData?.dateOfIssue?.toLowerCase().includes(searchTermLower) ||
-          // Search in items
-          doc.items?.some(item =>
-            item.containerNumber.toLowerCase().includes(searchTermLower) ||
-            item.description.toLowerCase().includes(searchTermLower) ||
-            item.seal.toLowerCase().includes(searchTermLower)
-          )
-        )
-      }
-
-      // Search in specific fields based on filter
-      switch (filterField) {
-        case 'bolNumber':
-          return doc.bolData?.bolNumber.toLowerCase().includes(searchTermLower)
-        case 'container':
-          return doc.items?.some(item =>
-            item.containerNumber.toLowerCase().includes(searchTermLower)
-          )
-        case 'description':
-          return doc.items?.some(item =>
-            item.description.toLowerCase().includes(searchTermLower)
-          )
-        case 'date':
-          return doc.bolData?.dateOfIssue?.toLowerCase().includes(searchTermLower)
-        default:
-          return false
-      }
-    })
-  }, [documents, searchTerm, filterField])
-
-  // Group filtered documents by BOL number
-  const groupedDocuments = useMemo(() => {
-    const groups = filteredDocuments.reduce((acc, doc) => {
-      const bolNumber = doc.bolData?.bolNumber || 'Unassigned'
-      if (!acc[bolNumber]) {
-        acc[bolNumber] = []
-      }
-      acc[bolNumber].push(doc)
-      return acc
-    }, {} as Record<string, Document[]>)
-
-    return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b))
-  }, [filteredDocuments])
-
-  const handleDelete = async (doc: Document) => {
-    setDeleteDoc(doc)
+  const toggleCardExpansion = (bolNumber: string) => {
+    setExpandedCards(prev => ({
+      ...prev,
+      [bolNumber]: !prev[bolNumber]
+    }))
+  }
+  
+  const toggleShipmentDetails = (e: React.MouseEvent, bolNumber: string) => {
+    e.stopPropagation() // Prevent triggering the card expansion
+    setExpandedShipmentDetails(prev => ({
+      ...prev,
+      [bolNumber]: !prev[bolNumber]
+    }))
   }
 
-  const confirmDelete = async () => {
-    if (!deleteDoc) return
+  const handleDeleteDocument = async () => {
+    if (!selectedDocument) return
 
-    setIsDeleting(true)
     try {
-      const response = await fetch(`/api/documents/${deleteDoc.id}`, {
+      const response = await fetch(`/api/documents/${selectedDocument._id}`, {
         method: 'DELETE',
       })
 
@@ -195,304 +213,268 @@ export function DocumentList({ documents }: DocumentListProps) {
       }
 
       toast({
-        title: 'Success',
-        description: 'Document deleted successfully'
+        title: 'Document Deleted',
+        description: `${selectedDocument.fileName} has been deleted successfully`,
       })
 
-      router.refresh()
+      // Call the callback if provided, otherwise refresh the page
+      if (onDocumentDeleted) {
+        onDocumentDeleted()
+      } else {
+        router.refresh()
+      }
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to delete document',
-        variant: 'destructive'
+        description: error instanceof Error ? error.message : 'Failed to delete document',
+        variant: 'destructive',
       })
     } finally {
-      setIsDeleting(false)
-      setDeleteDoc(null)
+      setShowDeleteConfirm(false)
+      setSelectedDocument(null)
     }
   }
 
-  // Add page navigation handler
-  const handlePageChange = (iframe: HTMLIFrameElement | null, direction: 'prev' | 'next') => {
-    if (!iframe?.contentWindow) return
+  const confirmDelete = (document: Document) => {
+    setSelectedDocument(document)
+    setShowDeleteConfirm(true)
+  }
+
+  // Function to handle document generation
+  const handleDocumentGenerated = () => {
+    // Preserve the current expanded state
+    const currentExpandedState = { ...expandedCards };
+    const currentShipmentDetailsState = { ...expandedShipmentDetails };
     
-    const message = direction === 'next' ? 'pdf-next-page' : 'pdf-prev-page'
-    iframe.contentWindow.postMessage(message, '*')
+    // Set a flag in sessionStorage to preserve the expanded state
+    sessionStorage.setItem('expandedCards', JSON.stringify(currentExpandedState));
+    sessionStorage.setItem('expandedShipmentDetails', JSON.stringify(currentShipmentDetailsState));
+    sessionStorage.setItem('preserveDocumentListState', 'true');
+    
+    if (onDocumentDeleted) {
+      onDocumentDeleted();
+    } else {
+      // Use router.refresh() to refresh data without a full page navigation
+      router.refresh();
+    }
+    
+    // After a short delay to allow for data refresh, ensure the expanded state is maintained
+    setTimeout(() => {
+      setExpandedCards(currentExpandedState);
+      setExpandedShipmentDetails(currentShipmentDetailsState);
+    }, 500);
   }
-
-  // Add message listener for PDF page updates
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      if (event.data.type === 'pdf-page-count') {
-        setTotalPages(event.data.pages)
-      } else if (event.data.type === 'pdf-page-change') {
-        setCurrentPage(event.data.page)
-      }
-    }
-
-    window.addEventListener('message', handleMessage)
-    return () => window.removeEventListener('message', handleMessage)
-  }, [])
-
-  // Reset page count when opening a new document
-  useEffect(() => {
-    if (viewerDoc) {
-      setCurrentPage(1)
-      setTotalPages(1)
-    }
-  }, [viewerDoc])
 
   if (documents.length === 0) {
     return (
-      <div className="text-center py-12">
-        <FileText className="mx-auto h-12 w-12 text-gray-400" />
-        <h3 className="mt-4 text-lg font-medium">No documents available</h3>
-        <p className="mt-2 text-muted-foreground">
-          There are no documents associated with this client yet
-        </p>
-        <Link href="/dashboard/clients" className="mt-4 inline-block">
-          <Button variant="outline" className="mt-4">
-            Back to Clients
-          </Button>
-        </Link>
-      </div>
+      <Card>
+        <CardContent className="pt-6">
+          <p className="text-center text-muted-foreground">No documents found</p>
+        </CardContent>
+      </Card>
     )
   }
 
   return (
-    <>
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle>Search Documents</CardTitle>
-          <CardDescription>
-            Search through BOLs by various criteria
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex space-x-4">
-            <div className="flex-1">
-              <Input
-                placeholder="Search..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full"
-              />
-            </div>
-            <Select
-              value={filterField}
-              onValueChange={setFilterField}
-            >
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Filter by..." />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Fields</SelectItem>
-                <SelectItem value="bolNumber">BOL Number</SelectItem>
-                <SelectItem value="container">Container</SelectItem>
-                <SelectItem value="description">Description</SelectItem>
-                <SelectItem value="date">Date</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="space-y-4">
-        {groupedDocuments.map(([bolNumber, docs]) => (
-          <Card key={bolNumber} className="overflow-hidden">
+    <div className="space-y-6">
+      {Object.entries(groupedDocuments).map(([bolNumber, docs]) => {
+        const bolDoc = docs.find(doc => doc.type === 'BOL')
+        const isExpanded = expandedCards[bolNumber] || false
+        const isShipmentDetailsExpanded = expandedShipmentDetails[bolNumber] || false
+        
+        return (
+          <Card key={bolNumber} className="mb-4">
             <CardHeader 
-              className="cursor-pointer hover:bg-accent"
-              onClick={() => {
-                if (selectedDoc?.id === docs[0].id) {
-                  setSelectedDoc(null)
-                } else {
-                  setSelectedDoc(docs[0])
-                }
-              }}
+              className="cursor-pointer hover:bg-muted transition-colors"
+              onClick={() => toggleCardExpansion(bolNumber)}
             >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <ChevronDown 
-                    className={`h-5 w-5 transition-transform duration-200 ${
-                      selectedDoc?.id === docs[0].id ? 'transform rotate-180' : ''
-                    }`}
-                  />
-                  <div>
-                    <CardTitle className="text-lg">BOL #{bolNumber}</CardTitle>
-                    <CardDescription>
-                      {docs[0].bolData?.vessel && `Vessel: ${docs[0].bolData.vessel}`}
-                      {docs[0].bolData?.dateOfIssue && ` • Date: ${docs[0].bolData.dateOfIssue}`}
-                    </CardDescription>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setViewerDoc(docs[0])
-                    }}
-                  >
-                    <Eye className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      window.open(`/api/documents/${docs[0].id}/download`, '_blank')
-                    }}
-                  >
-                    <Download className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleDelete(docs[0])
-                    }}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
+              <div className="flex justify-between items-center">
+                <CardTitle>BOL: {bolNumber}</CardTitle>
+                {isExpanded ? (
+                  <ChevronUp className="h-5 w-5" />
+                ) : (
+                  <ChevronDown className="h-5 w-5" />
+                )}
               </div>
             </CardHeader>
+            
+            {isExpanded && (
+              <CardContent>
+                {bolDoc && (
+                  <div className="space-y-6">
+                    {/* BOL Document Section */}
+                    <div className="flex justify-between items-center">
+                      <h3 className="text-lg font-semibold">BOL Document</h3>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            window.open(`/api/documents/${bolDoc._id}/view`, '_blank')
+                          }}
+                        >
+                          <Eye className="mr-2 h-4 w-4" />
+                          View
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            window.location.href = `/api/documents/${bolDoc._id}/download`
+                          }}
+                        >
+                          <Download className="mr-2 h-4 w-4" />
+                          Download
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-red-500 hover:text-red-700"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            confirmDelete(bolDoc)
+                          }}
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Delete
+                        </Button>
+                      </div>
+                    </div>
 
-            {selectedDoc?.id === docs[0].id && (
-              <CardContent className="border-t">
-                <div className="space-y-4 py-4">
-                  <div className="grid grid-cols-2 gap-4">
+                    {/* Shipment Details Section with Dropdown */}
                     <div>
-                      <h4 className="font-semibold mb-2">Shipping Details</h4>
-                      <dl className="space-y-1">
-                        <div className="flex">
-                          <dt className="w-32 text-muted-foreground">Booking:</dt>
-                          <dd>{docs[0].bolData?.bookingNumber || '-'}</dd>
+                      <div 
+                        className="flex justify-between items-center cursor-pointer hover:bg-muted/50 p-2 rounded-md transition-colors"
+                        onClick={(e) => toggleShipmentDetails(e, bolNumber)}
+                      >
+                        <h3 className="font-medium">Shipment details</h3>
+                        {isShipmentDetailsExpanded ? (
+                          <ChevronUp className="h-4 w-4" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4" />
+                        )}
+                      </div>
+                      
+                      {isShipmentDetailsExpanded && (
+                        <div className="mt-2 pl-2">
+                          {bolDoc.items && bolDoc.items.length > 0 ? (
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>Item #</TableHead>
+                                  <TableHead>Container No.</TableHead>
+                                  <TableHead>Seal</TableHead>
+                                  <TableHead>Description</TableHead>
+                                  <TableHead>Quantity (L)</TableHead>
+                                  <TableHead>Quantity (KG)</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {bolDoc.items.map((item, index) => (
+                                  <TableRow key={index}>
+                                    <TableCell>{item.itemNumber}</TableCell>
+                                    <TableCell>{item.containerNumber}</TableCell>
+                                    <TableCell>{item.seal}</TableCell>
+                                    <TableCell>{item.description}</TableCell>
+                                    <TableCell>{item.quantity.litros}</TableCell>
+                                    <TableCell>{item.quantity.kg}</TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          ) : bolDoc.bolData?.items && bolDoc.bolData.items.length > 0 ? (
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>Description</TableHead>
+                                  <TableHead>Quantity</TableHead>
+                                  <TableHead>Unit</TableHead>
+                                  <TableHead>HS Code</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {bolDoc.bolData.items.map((item, index) => (
+                                  <TableRow key={index}>
+                                    <TableCell>{item.description}</TableCell>
+                                    <TableCell>{item.quantity}</TableCell>
+                                    <TableCell>{item.unit}</TableCell>
+                                    <TableCell>{item.hsCode}</TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          ) : (
+                            <p className="text-sm text-muted-foreground">No shipment details available</p>
+                          )}
                         </div>
-                        <div className="flex">
-                          <dt className="w-32 text-muted-foreground">From:</dt>
-                          <dd>{docs[0].bolData?.portOfLoading}</dd>
-                        </div>
-                        <div className="flex">
-                          <dt className="w-32 text-muted-foreground">To:</dt>
-                          <dd>{docs[0].bolData?.portOfDischarge}</dd>
-                        </div>
-                        <div className="flex">
-                          <dt className="w-32 text-muted-foreground">Total Weight:</dt>
-                          <dd>{docs[0].bolData?.totalWeight.kg} kg</dd>
-                        </div>
-                      </dl>
+                      )}
                     </div>
-                    <div>
-                      <h4 className="font-semibold mb-2">Shipper</h4>
-                      <p className="text-sm">{docs[0].bolData?.shipper}</p>
-                    </div>
-                  </div>
 
-                  <div>
-                    <div 
-                      className="flex items-center gap-2 cursor-pointer hover:bg-accent rounded-md p-2"
-                      onClick={() => {
-                        if (expandedContainers === docs[0].id) {
-                          setExpandedContainers(null)
-                        } else {
-                          setExpandedContainers(docs[0].id)
-                        }
-                      }}
-                    >
-                      <ChevronDown 
-                        className={`h-5 w-5 transition-transform duration-200 ${
-                          expandedContainers === docs[0].id ? 'transform rotate-180' : ''
-                        }`}
-                      />
-                      <h4 className="font-semibold">Containers ({docs[0].bolData?.totalContainers})</h4>
-                    </div>
-                    
-                    {expandedContainers === docs[0].id && (
-                      <div className="overflow-x-auto mt-2">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Container</TableHead>
-                              <TableHead>Seal</TableHead>
-                              <TableHead>Description</TableHead>
-                              <TableHead className="text-right">Quantity</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {docs[0].items?.map((item) => (
-                              <TableRow key={item.containerNumber}>
-                                <TableCell>{item.containerNumber}</TableCell>
-                                <TableCell>{item.seal}</TableCell>
-                                <TableCell>{item.description}</TableCell>
-                                <TableCell className="text-right">
-                                  {item.quantity.litros} L / {item.quantity.kg} kg
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
+                    {/* Container Details Section */}
+                    {bolDoc.bolData?.containers && bolDoc.bolData.containers.length > 0 && (
+                      <div>
+                        <h3 className="text-lg font-semibold mb-2">Container Details</h3>
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Container</th>
+                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Seal</th>
+                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Weight</th>
+                              </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                              {bolDoc.bolData.containers.map((container, index) => (
+                                <tr key={index}>
+                                  <td className="px-3 py-2 whitespace-nowrap text-sm">{container.containerNumber}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-sm">{container.sealNumber}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-sm">{container.containerType}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-sm">
+                                    {container.grossWeight} {container.weightUnit}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
                     )}
+
+                    {/* Related Documents Section */}
+                    <div>
+                      <h3 className="text-lg font-semibold mb-2">Related Documents</h3>
+                      <RelatedDocuments
+                        bolId={bolDoc._id}
+                        bolNumber={bolNumber}
+                        existingDocuments={docs.filter(doc => doc.type !== 'BOL')}
+                        onDocumentGenerated={handleDocumentGenerated}
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
               </CardContent>
             )}
           </Card>
-        ))}
-      </div>
+        )
+      })}
 
-      {/* Document Viewer Dialog */}
-      <Dialog open={!!viewerDoc} onOpenChange={(open) => !open && setViewerDoc(null)}>
-        <DialogContent className="max-w-[98vw] w-[98vw] h-[98vh] resize rounded-lg overflow-hidden p-0">
-          <div className="flex flex-col h-full">
-            <div className="flex items-center justify-between px-2 py-1 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-              <DialogTitle className="text-xs font-medium">
-                BOL #{viewerDoc?.bolData?.bolNumber}
-              </DialogTitle>
-            </div>
-            <div className="flex-1 min-h-0 bg-white">
-              {viewerDoc && (
-                <embed
-                  src={`/api/documents/${viewerDoc.id}/view`}
-                  type="application/pdf"
-                  className="w-full h-full"
-                />
-              )}
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={!!deleteDoc} onOpenChange={() => setDeleteDoc(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete Document</DialogTitle>
-            <DialogDescription>
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Deletion</AlertDialogTitle>
+            <AlertDialogDescription>
               Are you sure you want to delete this document? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDeleteDoc(null)}
-              disabled={isDeleting}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={confirmDelete}
-              disabled={isDeleting}
-            >
-              {isDeleting ? 'Deleting...' : 'Delete'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteDocument}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   )
 } 

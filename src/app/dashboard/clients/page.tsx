@@ -6,16 +6,32 @@ import { Button } from '@/components/ui/button'
 import { Plus } from 'lucide-react'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { Types } from 'mongoose'
+
+interface MongoClient {
+  _id: Types.ObjectId
+  name: string
+  rif: string
+  address?: string
+  lastDocumentDate?: string
+  __v: number
+  createdAt: Date
+  updatedAt: Date
+}
 
 async function getClients() {
   await connectDB()
-  const clients = await Client.find({}).sort({ name: 1 }).lean()
+  const clients = await Client.find({}).sort({ name: 1 }).lean().exec()
   
-  return clients.map(client => ({
+  return (clients as unknown as MongoClient[]).map(client => ({
     id: client._id.toString(),
     name: client.name,
     rif: client.rif,
-    lastDocument: client.lastDocument
+    address: client.address,
+    lastDocument: client.lastDocumentDate ? {
+      date: client.lastDocumentDate,
+      type: 'BOL'
+    } : undefined
   }))
 }
 
@@ -28,8 +44,8 @@ export default async function ClientsPage() {
   const clients = await getClients()
 
   return (
-    <div className="container py-8">
-      <div className="flex items-center justify-between mb-8">
+    <div className="space-y-8">
+      <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Clients</h1>
         <Link href="/dashboard/clients/new">
           <Button>
@@ -40,13 +56,11 @@ export default async function ClientsPage() {
       </div>
 
       {clients.length === 0 ? (
-        <div className="text-center py-12">
-          <p className="text-muted-foreground">
-            No clients found. Add your first client to get started.
-          </p>
+        <div className="text-center">
+          <p className="text-muted-foreground">No clients found</p>
         </div>
       ) : (
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {clients.map((client) => (
             <ClientCard key={client.id} client={client} />
           ))}
