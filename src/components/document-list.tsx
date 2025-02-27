@@ -21,7 +21,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { Eye, FileText, Download, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
+import { Eye, FileText, Download, Trash2, ChevronDown, ChevronUp, Calendar } from 'lucide-react'
 import { useToast } from '@/components/ui/use-toast'
 import {
   Card,
@@ -30,6 +30,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { RelatedDocuments } from './related-documents'
+import { format } from 'date-fns'
 
 interface Container {
   containerNumber: string
@@ -106,6 +107,8 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
   const [groupedDocuments, setGroupedDocuments] = useState<Record<string, Document[]>>({})
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({})
   const [expandedShipmentDetails, setExpandedShipmentDetails] = useState<Record<string, boolean>>({})
+  const [dateInputs, setDateInputs] = useState<Record<string, string>>({})
+  const [isSubmittingDate, setIsSubmittingDate] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     // Group documents by BOL number
@@ -269,6 +272,47 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
     }, 500);
   }
 
+  const handleDateSubmit = async (docId: string) => {
+    const date = dateInputs[docId]
+    if (!date) return
+    
+    setIsSubmittingDate(prev => ({ ...prev, [docId]: true }))
+    
+    try {
+      const response = await fetch(`/api/documents/${docId}/update-date`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ dateOfIssue: date }),
+      })
+      
+      if (!response.ok) {
+        throw new Error('Failed to update date')
+      }
+      
+      toast({
+        title: 'Date Updated',
+        description: 'Document date has been updated successfully',
+      })
+      
+      // Refresh the page or fetch updated data
+      if (onDocumentDeleted) {
+        onDocumentDeleted()
+      } else {
+        router.refresh()
+      }
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to update date',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsSubmittingDate(prev => ({ ...prev, [docId]: false }))
+    }
+  }
+
   if (documents.length === 0) {
     return (
       <Card>
@@ -293,7 +337,15 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
               onClick={() => toggleCardExpansion(bolNumber)}
             >
               <div className="flex justify-between items-center">
-                <CardTitle>BOL: {bolNumber}</CardTitle>
+                <div className="flex flex-col">
+                  <CardTitle>BOL: {bolNumber}</CardTitle>
+                  {bolDoc && !bolDoc.bolData?.dateOfIssue && (
+                    <span className="text-xs text-amber-600 dark:text-amber-400 mt-1 flex items-center">
+                      <Calendar className="h-3 w-3 mr-1" />
+                      Missing date
+                    </span>
+                  )}
+                </div>
                 {isExpanded ? (
                   <ChevronUp className="h-5 w-5" />
                 ) : (
@@ -388,7 +440,36 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                             <div>
                               <p className="text-sm font-medium text-gray-500">Date of Issue</p>
-                              <p>{bolDoc.bolData?.dateOfIssue || 'N/A'}</p>
+                              {bolDoc.bolData?.dateOfIssue ? (
+                                <p>{bolDoc.bolData.dateOfIssue}</p>
+                              ) : (
+                                <div>
+                                  <div className="text-amber-600 dark:text-amber-400 text-sm font-medium mb-2">
+                                    <span className="flex items-center">
+                                      <Calendar className="h-3 w-3 mr-1" />
+                                      No date detected. Please add a date:
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center">
+                                    <input
+                                      type="date"
+                                      className="py-1 px-2 border rounded text-sm"
+                                      value={dateInputs[bolDoc._id] || ''}
+                                      onChange={(e) => setDateInputs(prev => ({ ...prev, [bolDoc._id]: e.target.value }))}
+                                      placeholder="Select date"
+                                    />
+                                    <Button 
+                                      size="sm" 
+                                      variant="outline"
+                                      className="ml-2"
+                                      disabled={!dateInputs[bolDoc._id] || isSubmittingDate[bolDoc._id]}
+                                      onClick={() => handleDateSubmit(bolDoc._id)}
+                                    >
+                                      {isSubmittingDate[bolDoc._id] ? 'Saving...' : 'Save Date'}
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                             <div>
                               <p className="text-sm font-medium text-gray-500">Booking Number</p>

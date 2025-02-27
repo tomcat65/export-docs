@@ -234,6 +234,7 @@ export async function POST(
 
       return NextResponse.json({
         success: true,
+        documentId: existingDocument._id.toString(),
         document: {
           id: existingDocument._id,
           bolData: existingDocument.bolData,
