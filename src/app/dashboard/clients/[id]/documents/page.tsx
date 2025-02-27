@@ -20,6 +20,7 @@ interface SerializedDocument {
     bookingNumber?: string
     shipper?: string
     vessel?: string
+    voyage?: string
     portOfLoading?: string
     portOfDischarge?: string
     dateOfIssue?: string

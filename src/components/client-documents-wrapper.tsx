@@ -22,6 +22,7 @@ interface SerializedDocument {
     bookingNumber?: string
     shipper?: string
     vessel?: string
+    voyage?: string
     portOfLoading?: string
     portOfDischarge?: string
     dateOfIssue?: string
@@ -68,8 +69,22 @@ export function ClientDocumentsWrapper({
   initialClient: SerializedClient 
 }) {
   const router = useRouter()
-  const [client, setClient] = useState(initialClient)
+  const [client, setClient] = useState<SerializedClient>(initialClient)
   
+  // Convert serialized documents to proper format
+  const convertToDocumentFormat = (docs: SerializedDocument[]) => {
+    return docs.map(doc => ({
+      ...doc,
+      bolData: doc.bolData ? {
+        ...doc.bolData,
+        totalWeight: doc.bolData.totalWeight ? {
+          kg: parseFloat(doc.bolData.totalWeight.kg),
+          lbs: parseFloat(doc.bolData.totalWeight.lbs)
+        } : undefined
+      } : undefined
+    }));
+  };
+
   // Function to refresh documents without a full page refresh
   const refreshDocuments = useCallback(async () => {
     try {
@@ -122,7 +137,7 @@ export function ClientDocumentsWrapper({
 
       <DocumentList 
         clientId={client.id} 
-        documents={client.documents}
+        documents={convertToDocumentFormat(client.documents) as any}
         onDocumentDeleted={refreshDocuments}
       />
     </div>

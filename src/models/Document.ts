@@ -55,6 +55,7 @@ interface IDocument {
     bookingNumber?: string
     shipper: string
     vessel?: string
+    voyage?: string  // Adding voyage number field
     portOfLoading: string
     portOfDischarge: string
     dateOfIssue?: string
@@ -141,6 +142,7 @@ const documentSchema = new mongoose.Schema<IDocument>({
     bookingNumber: String,
     shipper: String,
     vessel: String,
+    voyage: String,  // Adding voyage number field to schema
     portOfLoading: String,
     portOfDischarge: String,
     dateOfIssue: String,

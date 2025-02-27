@@ -8,7 +8,7 @@ import { useSession } from 'next-auth/react'
 import Image from 'next/image'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/use-toast'
-import { Loader2, Trash2, FileImage } from 'lucide-react'
+import { Loader2, Trash2, FileImage, Database } from 'lucide-react'
 import { useState } from 'react'
 
 const navigation = [
@@ -23,34 +23,32 @@ export function Header() {
   const { toast } = useToast()
   const router = useRouter()
   const [isCleaning, setIsCleaning] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
 
   const handleCleanup = async () => {
     try {
-      setIsCleaning(true)
+      setIsLoading(true)
       const response = await fetch('/api/documents/cleanup', {
-        method: 'POST'
+        method: 'POST',
       })
-
-      if (!response.ok) {
-        throw new Error('Failed to cleanup documents')
-      }
-
-      const data = await response.json()
       
+      if (!response.ok) {
+        throw new Error('Database cleanup failed')
+      }
+      
+      const result = await response.json()
       toast({
-        title: 'Cleanup Complete',
-        description: `Processed ${data.stats.processed} BOLs, deleted ${data.stats.deleted} duplicates${data.stats.errors ? `, with ${data.stats.errors} errors` : ''}`
+        title: 'Database Cleanup Complete',
+        description: result.message || `Cleaned up ${result.duplicatesDeleted} duplicate(s) and ${result.orphansDeleted} orphaned document(s)`,
       })
-
-      router.refresh()
     } catch (error) {
       toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to cleanup documents',
-        variant: 'destructive'
+        title: 'Cleanup Failed',
+        description: error instanceof Error ? error.message : 'An error occurred during cleanup',
+        variant: 'destructive',
       })
     } finally {
-      setIsCleaning(false)
+      setIsLoading(false)
     }
   }
 
@@ -83,17 +81,17 @@ export function Header() {
                 isCleaning ? 'text-foreground' : 'text-foreground/60'
               )}
               onClick={handleCleanup}
-              disabled={isCleaning}
+              disabled={isLoading}
             >
-              {isCleaning ? (
+              {isLoading ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   Cleaning...
                 </>
               ) : (
                 <>
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Cleanup Files
+                  <Database className="w-4 h-4 mr-2" />
+                  Cleanup DB
                 </>
               )}
             </Button>

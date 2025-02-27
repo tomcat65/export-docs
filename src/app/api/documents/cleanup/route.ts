@@ -2,81 +2,124 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { connectDB } from '@/lib/db'
 import { Document } from '@/models/Document'
-import mongoose from 'mongoose'
+import mongoose, { Types } from 'mongoose'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+// Helper function to clean up documents with duplicate BOL numbers
 async function cleanupDuplicates(bucket: any) {
-  const stats = {
-    processed: 0,
-    deleted: 0,
-    errors: 0
+  // Group by BOL number
+  const bolDocs = await Document.find({ type: 'BOL' }).lean()
+  const bolNumbers = new Map<string, Types.ObjectId[]>()
+
+  // Collect BOL documents with same BOL number
+  for (const doc of bolDocs) {
+    if (!doc.bolData?.bolNumber) continue
+    
+    const bolNumber = doc.bolData.bolNumber
+    if (!bolNumbers.has(bolNumber)) {
+      bolNumbers.set(bolNumber, [])
+    }
+    bolNumbers.get(bolNumber)!.push(doc._id)
   }
 
-  try {
-    // Get all documents from MongoDB
-    const documents = await Document.find().lean()
-    const processedFiles = new Set()
+  let deletedCount = 0
 
-    // Group documents by BOL number
-    const groupedByBol = documents.reduce((acc, doc) => {
-      const bolNumber = doc.bolData?.bolNumber
-      if (bolNumber) {
-        if (!acc[bolNumber]) acc[bolNumber] = []
-        acc[bolNumber].push(doc)
+  // For each BOL number with duplicates, keep only the most recent
+  for (const [bolNumber, docIds] of bolNumbers.entries()) {
+    if (docIds.length <= 1) continue // Skip if no duplicates
+    
+    // Get full documents with creation date
+    const docs = await Document.find({ _id: { $in: docIds } })
+      .sort({ createdAt: -1 }) // Most recent first
+      .lean()
+    
+    // Skip the first (most recent) and delete the rest
+    for (let i = 1; i < docs.length; i++) {
+      const doc = docs[i]
+      try {
+        // Delete file
+        if (doc.fileId) {
+          await bucket.delete(new Types.ObjectId(doc.fileId))
+        }
+        
+        // Delete document 
+        await Document.findByIdAndDelete(doc._id)
+        deletedCount++
+        console.log(`Deleted duplicate document: ${doc._id} with BOL ${bolNumber}`)
+      } catch (error) {
+        console.error(`Error deleting document ${doc._id}:`, error)
       }
-      return acc
-    }, {} as Record<string, any[]>)
+    }
+  }
 
-    // Process each group
-    for (const [bolNumber, docs] of Object.entries(groupedByBol)) {
-      stats.processed++
+  return deletedCount
+}
+
+// Clean up orphaned documents (COO, PL) that reference BOLs that no longer exist
+async function cleanupOrphans(bucket: any) {
+  console.log('Starting orphaned document cleanup...')
+  
+  // Find all documents that have a relatedBolId
+  const relatedDocs = await Document.find({ 
+    relatedBolId: { $exists: true, $ne: null },
+    type: { $in: ['COO', 'PL'] }
+  }).lean()
+
+  console.log(`Found ${relatedDocs.length} COO/PL documents with relatedBolId`)
+  let orphanCount = 0
+
+  // Check each document if its related BOL exists
+  for (const doc of relatedDocs) {
+    try {
+      if (!doc.relatedBolId) {
+        console.log(`Document ${doc._id} has no relatedBolId - skipping`);
+        continue;
+      }
       
-      // Sort by creation date, newest first
-      docs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      // Use toString to ensure consistent comparison
+      const relatedBolIdStr = doc.relatedBolId.toString();
+      console.log(`Checking document ${doc._id}, type: ${doc.type}, relatedBolId: ${relatedBolIdStr}`)
       
-      // Keep the newest, delete the rest
-      for (let i = 1; i < docs.length; i++) {
-        const doc = docs[i]
-        if (!processedFiles.has(doc.fileId.toString())) {
+      // Query using the string ID
+      const bolDoc = await Document.findOne({ 
+        _id: relatedBolIdStr, 
+        type: 'BOL' 
+      });
+      
+      // If BOL doesn't exist, delete this document
+      if (!bolDoc) {
+        console.log(`Related BOL ${relatedBolIdStr} not found - document is orphaned`)
+        
+        // Delete file from GridFS
+        if (doc.fileId) {
           try {
-            await bucket.delete(new mongoose.Types.ObjectId(doc.fileId))
-            await Document.findByIdAndDelete(doc._id)
-            processedFiles.add(doc.fileId.toString())
-            stats.deleted++
-            console.log(`Deleted duplicate document: ${doc._id} with BOL ${bolNumber}`)
+            const fileIdStr = doc.fileId.toString();
+            await bucket.delete(new mongoose.Types.ObjectId(fileIdStr));
+            console.log(`Deleted orphaned file ${fileIdStr} from GridFS`);
           } catch (error) {
-            console.error(`Error deleting document ${doc._id}:`, error)
-            stats.errors++
+            // File might not exist, just log and continue
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.warn(`Error deleting file ${doc.fileId}, it may not exist: ${errorMessage}`);
           }
         }
+        
+        // Delete document from MongoDB
+        const deleteResult = await Document.findByIdAndDelete(doc._id);
+        orphanCount++;
+        console.log(`Deleted orphaned ${doc.type} document: ${doc._id}, delete result:`, deleteResult ? "Success" : "Not found");
+      } else {
+        console.log(`Document ${doc._id} has valid BOL reference - keeping`);
       }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`Error checking/deleting orphaned document ${doc._id}: ${errorMessage}`);
     }
-
-    // Find orphaned files in GridFS
-    const cursor = bucket.find()
-    const files = await cursor.toArray()
-    
-    for (const file of files) {
-      const doc = await Document.findOne({ fileId: file._id })
-      if (!doc && !processedFiles.has(file._id.toString())) {
-        try {
-          await bucket.delete(file._id)
-          stats.deleted++
-          console.log(`Deleted orphaned file: ${file._id}`)
-        } catch (error) {
-          console.error(`Error deleting orphaned file ${file._id}:`, error)
-          stats.errors++
-        }
-      }
-    }
-
-    return stats
-  } catch (error) {
-    console.error('Error in cleanup process:', error)
-    throw error
   }
+
+  console.log(`Completed orphan cleanup: ${orphanCount} documents deleted`);
+  return orphanCount;
 }
 
 export async function POST(request: NextRequest) {
@@ -89,25 +132,27 @@ export async function POST(request: NextRequest) {
 
     await connectDB()
 
-    const db = mongoose.connection.db
-    if (!db) {
-      throw new Error('Database connection not established')
-    }
-
-    const bucket = new mongoose.mongo.GridFSBucket(db, {
+    // Get GridFS bucket
+    const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db!, {
       bucketName: 'documents'
     })
 
-    const stats = await cleanupDuplicates(bucket)
+    // Clean up duplicate BOLs
+    const duplicatesDeleted = await cleanupDuplicates(bucket)
+    
+    // Clean up orphaned documents
+    const orphansDeleted = await cleanupOrphans(bucket)
 
     return NextResponse.json({
       success: true,
-      stats
+      duplicatesDeleted,
+      orphansDeleted,
+      message: `Cleanup completed: ${duplicatesDeleted} duplicates and ${orphansDeleted} orphaned documents deleted`
     })
   } catch (error) {
-    console.error('Error in cleanup endpoint:', error)
+    console.error('Error cleaning up documents:', error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to cleanup documents' },
+      { error: 'Failed to clean up documents' },
       { status: 500 }
     )
   }

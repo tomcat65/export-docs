@@ -187,6 +187,7 @@ export async function POST(
           bookingNumber: processedData.shipmentDetails.bookingNumber || '',
           shipper: processedData.parties.shipper.name,
           vessel: processedData.shipmentDetails.vesselName || '',
+          voyage: processedData.shipmentDetails.voyageNumber || '',
           portOfLoading: processedData.shipmentDetails.portOfLoading,
           portOfDischarge: processedData.shipmentDetails.portOfDischarge,
           dateOfIssue: processedData.shipmentDetails.dateOfIssue || '',

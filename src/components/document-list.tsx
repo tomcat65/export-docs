@@ -370,8 +370,29 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
                               <p>{bolDoc.bolData?.portOfLoading || 'N/A'}</p>
                             </div>
                             <div>
+                              <p className="text-sm font-medium text-gray-500">Vessel / Voyage</p>
+                              <p>
+                                {bolDoc.bolData?.vessel ? 
+                                  (bolDoc.bolData?.voyage ? 
+                                    `${bolDoc.bolData.vessel} / ${bolDoc.bolData.voyage}` : 
+                                    bolDoc.bolData.vessel) : 
+                                  'N/A'}
+                              </p>
+                            </div>
+                            <div>
                               <p className="text-sm font-medium text-gray-500">Port of Discharge</p>
                               <p>{bolDoc.bolData?.portOfDischarge || 'N/A'}</p>
+                            </div>
+                          </div>
+                          
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                            <div>
+                              <p className="text-sm font-medium text-gray-500">Date of Issue</p>
+                              <p>{bolDoc.bolData?.dateOfIssue || 'N/A'}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium text-gray-500">Booking Number</p>
+                              <p>{bolDoc.bolData?.bookingNumber || 'N/A'}</p>
                             </div>
                             <div>
                               <p className="text-sm font-medium text-gray-500">Total Weight</p>
@@ -413,36 +434,36 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
                               </TableBody>
                             </Table>
                           ) : bolDoc.bolData?.items && bolDoc.bolData.items.length > 0 ? (
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
+      <Table>
+        <TableHeader>
+          <TableRow>
                                   <TableHead>Description</TableHead>
                                   <TableHead>Quantity</TableHead>
                                   <TableHead>Unit</TableHead>
                                   <TableHead>HS Code</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
                                 {bolDoc.bolData.items.map((item, index) => (
                                   <TableRow key={index}>
                                     <TableCell>{item.description}</TableCell>
                                     <TableCell>{item.quantity}</TableCell>
                                     <TableCell>{item.unit}</TableCell>
                                     <TableCell>{item.hsCode}</TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
                           ) : (
                             <p className="text-sm text-muted-foreground">No shipment details available</p>
                           )}
-                        </div>
+                  </div>
                       )}
-                    </div>
+                  </div>
 
                     {/* Container Details Section */}
                     {bolDoc.bolData?.containers && bolDoc.bolData.containers.length > 0 && (
-                      <div>
+                  <div>
                         <h3 className="text-lg font-semibold mb-2">
                           Containers ({bolDoc.bolData.containers.length})
                         </h3>
@@ -469,8 +490,8 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
                               ))}
                             </tbody>
                           </table>
-                        </div>
-                      </div>
+                  </div>
+                  </div>
                     )}
 
                     {/* Related Documents Section */}
@@ -494,10 +515,16 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Confirm Deletion</AlertDialogTitle>
+            <AlertDialogTitle>Delete Document</AlertDialogTitle>
             <AlertDialogDescription>
               Are you sure you want to delete this document? This action cannot be undone.
             </AlertDialogDescription>
+            {selectedDocument?.type === 'BOL' && (
+              <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded-md text-yellow-700">
+                <strong>Warning:</strong> Deleting this BOL will also delete all related documents
+                (Certificates of Origin and Packing Lists) associated with it.
+              </div>
+            )}
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
@@ -505,6 +532,6 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+            </div>
   )
 } 

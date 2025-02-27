@@ -4,14 +4,370 @@ import { connectDB } from '@/lib/db'
 import { Document } from '@/models/Document'
 import { Client } from '@/models/Client'
 import { Asset } from '@/models/Asset'
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
+import { PDFDocument, rgb, StandardFonts, PDFPage, PDFImage, PDFFont } from 'pdf-lib'
 import mongoose from 'mongoose'
 import fs from 'fs'
 import path from 'path'
+import { Types } from 'mongoose'
 
 interface GenerateRequest {
   mode?: 'overwrite' | 'new'
   customDate?: string // Allow custom date to be provided
+}
+
+// Define types for function parameters
+type FontConfig = {
+  font: PDFFont;
+  boldFont: PDFFont;
+  italicFont?: PDFFont;
+}
+
+type PageConfig = {
+  width: number;
+  height: number;
+  margin: { top: number; right: number; bottom: number; left: number };
+  contentWidth: number;
+}
+
+type HeaderAssets = {
+  formattedBusinessDay: string;
+  logoImage: PDFImage | undefined;
+}
+
+type DrawFunctions = {
+  drawText: (text: string, x: number, y: number, options?: any) => void;
+  drawLine: (startX: number, startY: number, endX: number, endY: number, thickness?: number) => void;
+  drawRect?: (x: number, y: number, width: number, height: number, options?: any) => void;
+  getOrdinalSuffix?: (day: number) => string;
+}
+
+type DocumentData = {
+  client: any;
+  bolDocument: any;
+  containers: Array<{containerNumber: string, sealNumber: string}>;
+  uniqueProducts: Set<string>;
+}
+
+type SignatureAssets = {
+  currentY: number;
+  signatureImage: PDFImage | undefined;
+  notarySignatureImage: PDFImage | undefined;
+  notarySealImage: PDFImage | undefined;
+  businessDateObj: Date;
+  userName: string;
+}
+
+// Draw document header: logo, title, and date
+function drawDocumentHeader(
+  page: PDFPage,
+  { font, boldFont }: FontConfig,
+  { width, height, margin, contentWidth }: PageConfig,
+  { formattedBusinessDay, logoImage }: HeaderAssets,
+  { drawText, drawLine }: DrawFunctions
+) {
+  // Draw logo
+  if (logoImage) {
+    const logoWidth = 70;
+    const logoHeight = logoImage.height * (logoWidth / logoImage.width);
+    
+    page.drawImage(logoImage, {
+      x: margin.left,
+      y: height - margin.top - 20,
+      width: logoWidth,
+      height: logoHeight,
+    });
+  }
+  
+  // Draw document date at top left where logo is
+  drawText(formattedBusinessDay, margin.left, margin.top + 40, { font: font, size: 11 });
+  
+  // Draw document title - centered
+  drawText('CERTIFICATE OF ORIGIN', width / 2, margin.top + 70, { 
+    font: boldFont, 
+    size: 14, // Slightly smaller to prevent overflow
+    align: 'center'
+  });
+}
+
+// Draw document body: consignee info, booking details, container table, products
+function drawDocumentBody(
+  page: PDFPage,
+  { font, boldFont, italicFont }: FontConfig,
+  { width, height, margin, contentWidth }: PageConfig,
+  { client, bolDocument, containers, uniqueProducts }: DocumentData,
+  { drawText, drawLine, drawRect }: DrawFunctions
+) {
+  let currentY = margin.top + 120; // Start below the header
+  
+  // Draw buyer information
+  drawText('Buyer:', margin.left, currentY, { font: boldFont, size: 10 });
+  currentY += 15;
+  drawText(client.name, margin.left, currentY, { size: 10 });
+  currentY += 15;
+  drawText(`RIF: ${client.rif}`, margin.left, currentY, { size: 10 });
+  currentY += 20;
+
+  // Extract maritime booking and vessel information
+  const bookingNumber = bolDocument.bolData?.bookingNumber || 'N/A';
+  const vessel = bolDocument.bolData?.vessel || 'N/A';
+  const voyage = bolDocument.bolData?.voyage || 'N/A';
+  
+  // Log for debugging
+  console.log('BOL Data for COO generation:', {
+    bookingNumber,
+    vessel,
+    voyage,
+    dateOfIssue: bolDocument.bolData?.dateOfIssue,
+  });
+  
+  // Draw maritime booking information
+  drawText('Maritime Booking:', margin.left, currentY, { font: boldFont, size: 10 });
+  currentY += 15;
+  drawText(`${bookingNumber}`, margin.left, currentY, { size: 10 });
+  currentY += 15;
+  drawText(`Vessel / Voyage: ${vessel} / ${voyage}`, margin.left, currentY, { size: 10 });
+  currentY += 20;
+
+  // Draw container and seal table header
+  drawText('Container', margin.left, currentY, { font: boldFont, size: 8 });
+  drawText('Seal', margin.left + 200, currentY, { font: boldFont, size: 8 });
+  currentY += 10;
+  
+  // Draw line under header
+  drawLine(margin.left, currentY, margin.left + contentWidth, currentY);
+  currentY += 5;
+
+  // Draw container and seal table rows with smaller font and tighter spacing
+  if (containers && containers.length > 0) {
+    containers.forEach(({ containerNumber, sealNumber }) => {
+      drawText(containerNumber, margin.left, currentY, { size: 8 });
+      drawText(sealNumber, margin.left + 200, currentY, { size: 8 });
+      currentY += 10; // Reduced row spacing even further to match sample
+    });
+  } else if (bolDocument.items && bolDocument.items.length > 0) {
+    bolDocument.items.forEach((item: any) => {
+      drawText(item.containerNumber, margin.left, currentY, { size: 8 });
+      drawText(item.seal, margin.left + 200, currentY, { size: 8 });
+      currentY += 10; // Reduced row spacing to match sample
+    });
+  } else {
+    drawText('No container data available', margin.left, currentY, { size: 8, color: [0.6, 0.6, 0.6] });
+    currentY += 10;
+  }
+
+  // Draw line after the container table
+  drawLine(margin.left, currentY, margin.left + contentWidth, currentY);
+  currentY += 20;
+
+  // Draw product information
+  drawText('Product:', margin.left, currentY, { font: boldFont, size: 10 });
+  currentY += 15;
+  
+  // Get product descriptions
+  const products = Array.from(uniqueProducts).map(desc => desc);
+
+  // Draw product descriptions
+  if (products.length > 0) {
+    products.forEach((product, index) => {
+      // Format as "1. 1 FLEXI TANK Base Oil Group II 600N"
+      drawText(`${index + 1}. ${product}`, margin.left, currentY, { size: 9 });
+      currentY += 15;
+    });
+  } else {
+    drawText('No product data available', margin.left, currentY, { size: 9, color: [0.6, 0.6, 0.6] });
+    currentY += 15;
+  }
+
+  // Draw port information
+  const portOfLoading = bolDocument.bolData?.portOfLoading || 'N/A';
+  const portOfDischarge = bolDocument.bolData?.portOfDischarge || 'N/A';
+  
+  drawText(`Port of loading: ${portOfLoading}`, margin.left, currentY, { size: 9 });
+  currentY += 15;
+  drawText(`Port of discharge: ${portOfDischarge}`, margin.left, currentY, { size: 9 });
+  currentY += 30;
+
+  // Draw U.S.A. ORIGIN text centered with reduced font size
+  drawText('U.S.A. ORIGIN', width / 2, currentY, { 
+    font: boldFont, 
+    size: 14, 
+    align: 'center' 
+  });
+  currentY += 30;
+
+  return currentY;
+}
+
+// Draw document signature and notary section
+function drawSignatureAndNotary(
+  page: PDFPage,
+  { font, boldFont, italicFont }: FontConfig,
+  { width, height, margin, contentWidth }: PageConfig,
+  { currentY, signatureImage, notarySignatureImage, notarySealImage, businessDateObj, userName }: SignatureAssets,
+  { drawText, drawLine, drawRect, getOrdinalSuffix }: DrawFunctions
+) {
+  // 1. SIGNATURE BLOCK - More compact
+  currentY += 25; // Reduced spacing
+  drawText('Yours faithfully,', margin.left, currentY, { size: 10 });
+  
+  // Draw signature
+  currentY += 15; // Reduced spacing
+  if (signatureImage) {
+    const signatureWidth = Math.min(90, signatureImage.width); // Slightly smaller
+    const signatureHeight = signatureImage.height * (signatureWidth / signatureImage.width);
+    
+    page.drawImage(signatureImage, {
+      x: margin.left,
+      y: height - (currentY + 30),
+      width: signatureWidth,
+      height: signatureHeight,
+    });
+    
+    currentY += signatureHeight + 5; // Reduced spacing
+  } else {
+    // Signature line if no image
+    drawLine(margin.left, currentY + 30, margin.left + 150, currentY + 30, 1);
+    currentY += 35; // Reduced spacing
+  }
+  
+  // Signature details with more compact spacing
+  drawText(`${userName},`, margin.left, currentY, { size: 10 });
+  currentY += 15;
+  drawText('Vicepresident Latin America', margin.left, currentY, { size: 10 });
+  currentY += 15;
+  drawText('Texas Worldwide Oil Services LLC', margin.left, currentY, { size: 10 });
+  currentY += 15;
+  drawText('4743 Merwin St, Houston TX 77027', margin.left, currentY, { size: 10 });
+  currentY += 15;
+  drawText('USA Direct +1(713) 309-6637', margin.left, currentY, { size: 10 });
+  
+  // 2. NOTARY SECTION - Make sure it fits on the page
+  currentY += 15; // Reduced spacing more to avoid overlap with footer
+  
+  // Ensure the notary section has enough space, or adjust position
+  const remainingSpace = height - margin.bottom - currentY;
+  const notaryHeight = 110; // Reduced approximate height needed for notary section
+  
+  if (remainingSpace < notaryHeight) {
+    // Move up some elements if there's not enough space
+    currentY = height - margin.bottom - notaryHeight;
+  }
+  
+  // Draw notary statement with proper formatting - more compact
+  drawText('CITY: Houston', margin.left, currentY, { size: 9 });
+  drawText('COUNTY: Harris', margin.left + 150, currentY, { size: 9 });
+  drawText('STATE: TX', margin.left + 300, currentY, { size: 9 });
+
+  // Format the notary date with ordinal suffix
+  const notaryDateObj = businessDateObj;
+  const notaryDay = notaryDateObj.getDate();
+  const daySuffix = getOrdinalSuffix?.(notaryDay) || '';
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+                      'July', 'August', 'September', 'October', 'November', 'December'];
+  const monthName = monthNames[notaryDateObj.getMonth()];
+
+  // Draw the notary date line
+  currentY += 18; // Reduced spacing
+  const notaryLineY = currentY;
+  drawText('On this', margin.left, currentY, { size: 9 });
+  drawText(`${notaryDay}${daySuffix}`, margin.left + 40, currentY, { font: boldFont, size: 9 });
+  drawText('day of', margin.left + 60, currentY, { size: 9 });
+  drawText(`${monthName}`, margin.left + 95, currentY, { font: boldFont, size: 9 });
+  drawText(`, ${notaryDateObj.getFullYear()}`, margin.left + 160, currentY, { size: 9 });
+  drawText('personally appeared before me,', margin.left + 200, currentY, { size: 9 });
+  drawText(userName, margin.left + 380, currentY, { font: boldFont, size: 9 });
+
+  // Address line
+  currentY += 18; // Reduced spacing
+  drawText('doing business at', margin.left, currentY, { size: 9 });
+  drawText('4743 Merwin St, Houston, TX 77027', margin.left + 80, currentY, { font: boldFont, size: 9 });
+  
+  // Identity confirmation
+  currentY += 18; // Reduced spacing
+  drawText('personally known or sufficiently identified to me,', margin.left, currentY, { size: 9 });
+
+  // Certification line
+  currentY += 18; // Reduced spacing
+  drawText('who certifies that he is the individual who executed the foregoing instrument', margin.left, currentY, { size: 9 });
+  
+  // Acknowledgment line
+  currentY += 18; // Reduced spacing
+  drawText('and acknowledge it to be of free act and deed.', margin.left, currentY, { size: 9 });
+
+  // Draw notary signature with reduced size
+  if (notarySignatureImage) {
+    const signatureWidth = Math.min(90, notarySignatureImage.width); // Slightly smaller
+    const signatureHeight = notarySignatureImage.height * (signatureWidth / notarySignatureImage.width);
+    
+    page.drawImage(notarySignatureImage, {
+      x: width - margin.right - signatureWidth,
+      y: height - (notaryLineY + 55),
+      width: signatureWidth,
+      height: signatureHeight,
+    });
+  } else {
+    // Signature line if no image
+    drawLine(width - margin.right - 120, notaryLineY + 55, width - margin.right, notaryLineY + 55, 1);
+  }
+  
+  // Draw notary seal - adjust position for visibility
+  if (notarySealImage) {
+    const sealWidth = Math.min(75, notarySealImage.width); // Slightly smaller
+    const sealHeight = notarySealImage.height * (sealWidth / notarySealImage.width);
+    
+    page.drawImage(notarySealImage, {
+      x: margin.left + 200,
+      y: height - (notaryLineY + 45),
+      width: sealWidth,
+      height: sealHeight,
+    });
+  } else {
+    // Draw a rectangle for the notary seal if no image
+    drawRect?.(margin.left + 200, notaryLineY + 35, 75, 35, {
+      borderWidth: 1,
+      borderColor: [0, 0, 0]
+    });
+    
+    drawText('NOTARY SEAL', margin.left + 237, notaryLineY + 53, { 
+      font: italicFont, 
+      size: 9,
+      align: 'center',
+      maxWidth: 75
+    });
+  }
+
+  // Draw notary label
+  drawText('(Notary Public)', width - margin.right - 60, notaryLineY + 75, { 
+    font: italicFont, 
+    size: 9
+  });
+}
+
+// Draw document footer
+function drawDocumentFooter(
+  page: PDFPage,
+  { font }: { font: PDFFont },
+  { width, height, margin, contentWidth }: PageConfig,
+  { drawText, drawLine }: DrawFunctions
+) {
+  // Add a separator line before footer
+  drawLine(margin.left, height - margin.bottom - 50, width - margin.right, height - margin.bottom - 50, 1);
+  
+  // Footer - ensure it's clearly separated from the body
+  drawText('This Certificate of Origin is issued in accordance with international trade practises.', width / 2, height - margin.bottom - 40, {
+    size: 9,
+    align: 'center'
+  });
+  
+  drawText('TEXAS WORLDWIDE OIL SERVICES LLC', width / 2, height - margin.bottom - 25, {
+    size: 8,
+    align: 'center'
+  });
+  
+  drawText('USA Direct +1 (713) 309-6637 / +1 (713) 409-1637', width / 2, height - margin.bottom - 15, {
+    size: 8,
+    align: 'center'
+  });
 }
 
 export async function POST(
@@ -19,647 +375,450 @@ export async function POST(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    // Extract and validate the ID parameter
-    const { id } = await context.params
-    if (!id || id === 'undefined') {
-      return NextResponse.json({ error: 'Invalid document ID' }, { status: 400 })
-    }
-
     // Check authentication
     const session = await auth()
     if (!session?.user?.isAdmin) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Connect to database
-    const db = await connectDB()
-    if (!db) {
-      return NextResponse.json(
-        { error: 'Database connection failed' },
-        { status: 500 }
-      )
+    // Parse request body for mode and customDate
+    const body = await request.json()
+    const mode = body?.mode || 'new'
+    const customDate = body?.customDate
+    
+    await connectDB()
+
+    // Get the ID from params
+    const { id } = await context.params
+    if (!id || !Types.ObjectId.isValid(id)) {
+      return NextResponse.json({ error: 'Invalid document ID' }, { status: 400 })
     }
 
-    // Get request body
-    const body: GenerateRequest = await request.json()
-
-    // Find the BOL document
+    // Find document and related client
     const bolDocument = await Document.findById(id)
     if (!bolDocument || bolDocument.type !== 'BOL') {
-      return NextResponse.json({ error: 'BOL not found' }, { status: 404 })
+      return NextResponse.json({ error: 'BOL document not found' }, { status: 404 })
     }
 
-    // Get client information
     const client = await Client.findById(bolDocument.clientId)
     if (!client) {
       return NextResponse.json({ error: 'Client not found' }, { status: 404 })
     }
 
-    // Check for existing certificate
-    const existingCOO = await Document.findOne({
-      clientId: bolDocument.clientId,
-      type: 'COO',
-      relatedBolId: bolDocument._id
-    })
-
-    // If document exists and mode is not specified or is 'overwrite', delete the existing document
-    if (existingCOO && (!body.mode || body.mode === 'overwrite')) {
-      // Delete the existing file from GridFS
-      if (!mongoose.connection.db) {
-        return NextResponse.json(
-          { error: 'Database connection not available' },
-          { status: 500 }
-        )
-      }
-      
-      const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-        bucketName: 'documents'
+    // Check if there's already a COO document associated with this BOL
+    if (mode !== 'overwrite') {
+      const existingCOO = await Document.findOne({
+        relatedBolId: new Types.ObjectId(id),
+        type: 'COO'
       })
-      await bucket.delete(existingCOO.fileId)
-      await existingCOO.deleteOne()
+
+      if (existingCOO) {
+        return NextResponse.json({
+          document: {
+            _id: existingCOO._id,
+            fileName: existingCOO.fileName,
+            type: existingCOO.type
+          }
+        })
+      }
     }
 
-    // Create PDF document
+    // Create a new PDF document
     const pdfDoc = await PDFDocument.create()
     const page = pdfDoc.addPage([612, 792]) // US Letter size
-    const { width, height } = page.getSize()
     
-    // Get fonts
-    const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
-    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
-    const italicFont = await pdfDoc.embedFont(StandardFonts.HelveticaOblique)
+    // Set page margins
+    const margin = { top: 36, right: 36, bottom: 90, left: 36 }
+    const width = page.getWidth()
+    const height = page.getHeight()
+    const contentWidth = width - margin.left - margin.right
 
-    // Read logo file
-    const logoPath = path.join(process.cwd(), 'public', 'txwos-logo.png')
-    let logoImage;
-    try {
-      const logoImageBytes = fs.readFileSync(logoPath)
-      logoImage = await pdfDoc.embedPng(logoImageBytes)
-      
-      // Calculate logo dimensions (maintain aspect ratio)
-      const logoWidth = 120
-      const logoHeight = logoImage.height * (logoWidth / logoImage.width)
+    // Load fonts from StandardFonts
+    const font = await pdfDoc.embedFont(StandardFonts.TimesRoman)
+    const boldFont = await pdfDoc.embedFont(StandardFonts.TimesRomanBold)
+    const italicFont = await pdfDoc.embedFont(StandardFonts.TimesRomanItalic)
 
-      // Draw logo
-      page.drawImage(logoImage, {
-        x: 50,
-        y: height - 100,
-        width: logoWidth,
-        height: logoHeight,
-      })
-    } catch (error) {
-      console.error('Error embedding logo:', error)
-      // Continue without logo if there's an error
+    // Date handling logic - correctly parse from BOL data
+    let businessDateObj = new Date()
+    
+    // First, try to get date from BOL's dateOfIssue
+    if (bolDocument.bolData?.dateOfIssue) {
+      console.log("Using BOL dateOfIssue:", bolDocument.bolData.dateOfIssue);
+      try {
+        // Handle different date formats: MM/DD/YYYY or YYYY-MM-DD
+        if (bolDocument.bolData.dateOfIssue.includes('/')) {
+          const [month, day, year] = bolDocument.bolData.dateOfIssue.split('/').map((num: string) => parseInt(num, 10));
+          console.log("Parsed date components:", { month, day, year });
+          
+          // Ensure proper year format (handle 2-digit years)
+          const fullYear = year < 100 ? (year < 50 ? 2000 + year : 1900 + year) : year;
+          businessDateObj = new Date(fullYear, month - 1, day);
+          
+          console.log("Converted date object:", {
+            date: businessDateObj.toISOString(),
+            year: businessDateObj.getFullYear(),
+            month: businessDateObj.getMonth() + 1,
+            day: businessDateObj.getDate()
+          });
+        } else if (bolDocument.bolData.dateOfIssue.includes('-')) {
+          businessDateObj = new Date(bolDocument.bolData.dateOfIssue);
+          console.log("Parsed ISO date:", businessDateObj.toISOString());
+        }
+      } catch (error) {
+        console.error("Error parsing BOL date:", error);
+      }
+    } 
+    // If no BOL date or parsing failed, try customDate
+    else if (customDate) {
+      console.log("Using custom date:", customDate);
+      try {
+        businessDateObj = new Date(customDate);
+        console.log("Parsed custom date:", businessDateObj.toISOString());
+      } catch (error) {
+        console.error("Error parsing custom date:", error);
+      }
+    } 
+    // Fallback to current date
+    else {
+      console.log("Using current date as fallback:", new Date().toISOString());
     }
 
-    // Draw content
+    // Properly format the date for display
+    const getOrdinalSuffix = (day: number): string => {
+      if (day > 3 && day < 21) return 'th';
+      switch (day % 10) {
+        case 1: return 'st';
+        case 2: return 'nd';
+        case 3: return 'rd';
+        default: return 'th';
+      }
+    };
+
+    const formatDateFormal = (date: Date): string => {
+      const day = date.getDate();
+      const month = date.toLocaleString('en-US', { month: 'long' });
+      const year = date.getFullYear();
+      return `${month} ${day}, ${year}`;
+    };
+
+    const getNextBusinessDay = (date: Date): Date => {
+      const newDate = new Date(date);
+      newDate.setDate(newDate.getDate() + 1);
+      
+      // Skip weekends
+      const day = newDate.getDay();
+      if (day === 0) newDate.setDate(newDate.getDate() + 1); // Sunday, move to Monday
+      if (day === 6) newDate.setDate(newDate.getDate() + 2); // Saturday, move to Monday
+      
+      return newDate;
+    };
+
+    // Format dates for various parts of the document
+    const formattedBusinessDay = formatDateFormal(businessDateObj);
+    const businessDayName = businessDateObj.toLocaleString('en-US', { weekday: 'long' });
+    const businessMonth = businessDateObj.toLocaleString('en-US', { month: 'long' });
+    const businessDay = businessDateObj.getDate();
+    const businessYear = businessDateObj.getFullYear();
+
+    // Load logo
+    let logoImage;
+    try {
+      const logo = await Asset.findOne({ type: 'letterhead', name: /logo/i });
+      
+      if (logo && mongoose.connection.db) {
+        const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
+          bucketName: 'assets'
+        });
+        
+        const fileId = typeof logo.fileId === 'string' 
+          ? new mongoose.Types.ObjectId(logo.fileId)
+          : logo.fileId;
+          
+        const downloadStream = bucket.openDownloadStream(fileId);
+        
+        // Convert stream to buffer
+        const chunks: Buffer[] = [];
+        for await (const chunk of downloadStream) {
+          chunks.push(Buffer.from(chunk));
+        }
+        const buffer = Buffer.concat(chunks);
+        
+        // Embed logo image
+        if (logo.contentType.startsWith('image/')) {
+          if (logo.contentType === 'image/png') {
+            logoImage = await pdfDoc.embedPng(buffer);
+          } else if (logo.contentType === 'image/jpeg' || logo.contentType === 'image/jpg') {
+            logoImage = await pdfDoc.embedJpg(buffer);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error embedding logo:', error);
+    }
+
+    // Load signature and notary assets
+    let signatureImage, notarySignatureImage, notarySealImage;
+    try {
+      // Get the first name from the user's full name to search for their signature
+      const firstName = session.user?.name?.split(' ')[0] || '';
+      
+      const signatures = await Asset.find({ 
+        type: 'signature', 
+        name: { $regex: new RegExp(firstName, 'i') } 
+      });
+      
+      const signature = signatures.length > 0 
+        ? signatures[Math.floor(Math.random() * signatures.length)] 
+        : await Asset.findOne({ type: 'signature' });
+      
+      const notarySignature = await Asset.findOne({ type: 'signature', name: /notary/i });
+      const notarySeal = await Asset.findOne({ type: 'notary_seal' });
+      
+      if (mongoose.connection.db) {
+        const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
+          bucketName: 'assets'
+        });
+        
+        // Process signature
+        if (signature) {
+          const fileId = typeof signature.fileId === 'string' 
+            ? new mongoose.Types.ObjectId(signature.fileId)
+            : signature.fileId;
+            
+          const downloadStream = bucket.openDownloadStream(fileId);
+          
+          // Convert stream to buffer
+          const chunks: Buffer[] = [];
+          for await (const chunk of downloadStream) {
+            chunks.push(Buffer.from(chunk));
+          }
+          const buffer = Buffer.concat(chunks);
+          
+          // Embed signature image
+          if (signature.contentType.startsWith('image/')) {
+            if (signature.contentType === 'image/png') {
+              signatureImage = await pdfDoc.embedPng(buffer);
+            } else if (signature.contentType === 'image/jpeg' || signature.contentType === 'image/jpg') {
+              signatureImage = await pdfDoc.embedJpg(buffer);
+            }
+          }
+        }
+        
+        // Process notary signature if available
+        if (notarySignature) {
+          const fileId = typeof notarySignature.fileId === 'string' 
+            ? new mongoose.Types.ObjectId(notarySignature.fileId)
+            : notarySignature.fileId;
+            
+          const downloadStream = bucket.openDownloadStream(fileId);
+          
+          // Convert stream to buffer
+          const chunks: Buffer[] = [];
+          for await (const chunk of downloadStream) {
+            chunks.push(Buffer.from(chunk));
+          }
+          const buffer = Buffer.concat(chunks);
+          
+          // Embed notary signature image
+          if (notarySignature.contentType.startsWith('image/')) {
+            if (notarySignature.contentType === 'image/png') {
+              notarySignatureImage = await pdfDoc.embedPng(buffer);
+            } else if (notarySignature.contentType === 'image/jpeg' || notarySignature.contentType === 'image/jpg') {
+              notarySignatureImage = await pdfDoc.embedJpg(buffer);
+            }
+          }
+        }
+        
+        // Process notary seal if available
+        if (notarySeal) {
+          const fileId = typeof notarySeal.fileId === 'string' 
+            ? new mongoose.Types.ObjectId(notarySeal.fileId)
+            : notarySeal.fileId;
+            
+          const downloadStream = bucket.openDownloadStream(fileId);
+          
+          // Convert stream to buffer
+          const chunks: Buffer[] = [];
+          for await (const chunk of downloadStream) {
+            chunks.push(Buffer.from(chunk));
+          }
+          const buffer = Buffer.concat(chunks);
+          
+          // Embed notary seal image
+          if (notarySeal.contentType.startsWith('image/')) {
+            if (notarySeal.contentType === 'image/png') {
+              notarySealImage = await pdfDoc.embedPng(buffer);
+            } else if (notarySeal.contentType === 'image/jpeg' || notarySeal.contentType === 'image/jpg') {
+              notarySealImage = await pdfDoc.embedJpg(buffer);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error embedding signature/notary assets:', error);
+    }
+
+    // Helper functions for drawing
     const drawText = (text: string, x: number, y: number, options: { 
-      font?: typeof font, 
+      font?: PDFFont, 
       size?: number,
       color?: [number, number, number],
       align?: 'left' | 'center' | 'right',
       maxWidth?: number
     } = {}) => {
       const { 
-        font: f = font, 
-        size = 11, 
-        color = [0, 0, 0],
+        font: textFont = font, 
+        size = 10, 
+        color = [0, 0, 0], 
         align = 'left',
         maxWidth
-      } = options
+      } = options;
       
-      let xPos = x
-      if (align === 'center' && maxWidth) {
-        const textWidth = f.widthOfTextAtSize(text, size)
-        xPos = x + (maxWidth - textWidth) / 2
-      } else if (align === 'right' && maxWidth) {
-        const textWidth = f.widthOfTextAtSize(text, size)
-        xPos = x + maxWidth - textWidth
+      const textWidth = textFont.widthOfTextAtSize(text, size);
+      let xPosition = x;
+      
+      if (align === 'center') {
+        xPosition = x - (textWidth / 2);
+      } else if (align === 'right') {
+        xPosition = x - textWidth;
       }
       
       page.drawText(text, {
-        x: xPos,
+        x: xPosition,
         y: height - y,
-        font: f,
         size,
-        color: rgb(color[0], color[1], color[2])
-      })
-    }
+        font: textFont,
+        color: rgb(color[0], color[1], color[2]),
+        maxWidth
+      });
+    };
 
-    // Draw a line
     const drawLine = (startX: number, startY: number, endX: number, endY: number, thickness: number = 1) => {
       page.drawLine({
         start: { x: startX, y: height - startY },
         end: { x: endX, y: height - endY },
         thickness,
-        color: rgb(0, 0, 0),
-      })
-    }
+        color: rgb(0, 0, 0)
+      });
+    };
 
-    // Draw a rectangle
-    const drawRect = (x: number, y: number, width: number, height: number, options: {
+    const drawRect = (x: number, y: number, rectWidth: number, rectHeight: number, options: {
       fill?: boolean,
       color?: [number, number, number],
       borderColor?: [number, number, number],
       borderWidth?: number
     } = {}) => {
-      const {
-        fill = false,
-        color = [1, 1, 1],
-        borderColor = [0, 0, 0],
-        borderWidth = 1
+      const { 
+        fill = false, 
+        color = [1, 1, 1], 
+        borderColor = [0, 0, 0], 
+        borderWidth = 1 
       } = options;
+      
+      page.drawRectangle({
+        x,
+        y: height - y - rectHeight,
+        width: rectWidth,
+        height: rectHeight,
+        color: fill ? rgb(color[0], color[1], color[2]) : undefined,
+        borderColor: borderWidth > 0 ? rgb(borderColor[0], borderColor[1], borderColor[2]) : undefined,
+        borderWidth: borderWidth > 0 ? borderWidth : undefined
+      });
+    };
 
-      if (fill) {
-        page.drawRectangle({
-          x,
-          y: page.getHeight() - y - height,
-          width,
-          height,
-          color: rgb(color[0], color[1], color[2]),
+    // Extract container numbers and seals from BOL
+    const containers: Array<{containerNumber: string, sealNumber: string}> = [];
+    
+    if (bolDocument.items && bolDocument.items.length > 0) {
+      bolDocument.items.forEach((item: any) => {
+        containers.push({
+          containerNumber: item.containerNumber,
+          sealNumber: item.seal
         });
-      }
-
-      // Draw border if borderWidth > 0
-      if (borderWidth > 0) {
-        page.drawRectangle({
-          x,
-          y: page.getHeight() - y - height,
-          width,
-          height,
-          borderColor: rgb(borderColor[0], borderColor[1], borderColor[2]),
-          borderWidth,
-        });
-      }
-    }
-
-    // Generate certificate number (append suffix for new versions)
-    let certificateNumber = `${bolDocument.bolData?.bolNumber}-COO`
-    if (existingCOO && body.mode === 'new') {
-      const existingCOOs = await Document.find({
-        clientId: bolDocument.clientId,
-        type: 'COO',
-        relatedBolId: bolDocument._id
-      }).sort({ createdAt: -1 })
-      certificateNumber = `${bolDocument.bolData?.bolNumber}-COO-${existingCOOs.length + 1}`
-    }
-
-    // Determine the date to use
-    let documentDate: string;
-    
-    // Priority: 1. Custom date from request, 2. BOL date, 3. Current date
-    if (body.customDate) {
-      documentDate = body.customDate;
-    } else if (bolDocument.bolData?.dateOfIssue) {
-      documentDate = bolDocument.bolData.dateOfIssue;
-    } else {
-      // Format current date as MM/DD/YYYY
-      const now = new Date();
-      documentDate = `${now.getMonth() + 1}/${now.getDate()}/${now.getFullYear()}`;
-    }
-    
-    // Calculate the next business day for notary date (based on BOL date or current date)
-    let notaryDate: Date;
-    if (body.customDate) {
-      // Parse the custom date (assuming MM/DD/YYYY format)
-      const [month, day, year] = body.customDate.split('/').map(Number);
-      notaryDate = new Date(year, month - 1, day);
-    } else if (bolDocument.bolData?.dateOfIssue) {
-      // Parse the BOL date (assuming MM/DD/YYYY format)
-      const [month, day, year] = bolDocument.bolData.dateOfIssue.split('/').map(Number);
-      notaryDate = new Date(year, month - 1, day);
-    } else {
-      notaryDate = new Date();
-    }
-
-    // Add one day to get the next day
-    notaryDate.setDate(notaryDate.getDate() + 1);
-
-    // If it's a weekend, move to Monday
-    const dayOfWeek = notaryDate.getDay();
-    if (dayOfWeek === 0) { // Sunday
-      notaryDate.setDate(notaryDate.getDate() + 1);
-    } else if (dayOfWeek === 6) { // Saturday
-      notaryDate.setDate(notaryDate.getDate() + 2);
-    }
-
-    // Format notary date for display
-    const notaryDateFormatted = `${notaryDate.getMonth() + 1}/${notaryDate.getDate()}/${notaryDate.getFullYear()}`;
-
-    // Header
-    // Logo and Company header
-    if (logoImage) {
-      // Calculate logo dimensions (maintain aspect ratio)
-      const logoWidth = 120
-      const logoHeight = logoImage.height * (logoWidth / logoImage.width)
-
-      // Draw logo
-      page.drawImage(logoImage, {
-        x: 50,
-        y: height - 100,
-        width: logoWidth,
-        height: logoHeight,
-      })
-    }
-    
-    // Date at top left
-    drawText(`Date: ${documentDate}`, 50, 130, { font: boldFont })
-    
-    // Document title
-    drawText('CERTIFICATE OF ORIGIN', width / 2, 170, { 
-      font: boldFont, 
-      size: 20, 
-      align: 'center', 
-      maxWidth: width 
-    })
-    
-    // Certificate number
-    drawText(`Certificate No: ${certificateNumber}`, 50, 200, { font: boldFont })
-    
-    // Draw horizontal line
-    drawLine(50, 210, width - 50, 210, 1.5)
-
-    // Buyer Information (Client)
-    drawText('BUYER:', 50, 230, { font: boldFont, size: 12 })
-    drawText(client.name, 50, 245)
-    if (client.address) {
-      // Split address into multiple lines if needed
-      const addressLines = client.address.split('\n')
-      addressLines.forEach((line: string, index: number) => {
-        drawText(line, 50, 260 + (index * 15))
-      })
-    }
-    if (client.rif) {
-      drawText(`RIF: ${client.rif}`, 50, client.address ? 290 : 260)
-    }
-
-    // Maritime Booking Information
-    drawText('MARITIME BOOKING:', 50, 320, { font: boldFont, size: 12 })
-    drawText(`Bill of Lading No: ${bolDocument.bolData?.bolNumber || 'N/A'}`, 50, 335)
-    drawText(`Booking No: ${bolDocument.bolData?.bookingNumber || 'N/A'}`, 50, 350)
-    drawText(`Vessel: ${bolDocument.bolData?.vessel || 'N/A'}`, 50, 365)
-    
-    // Container Information
-    drawText('CONTAINER:', 300, 320, { font: boldFont, size: 12 })
-    
-    // Extract container numbers from items
-    const containerNumbers = new Set<string>();
-    bolDocument.items?.forEach((item: any) => {
-      if (item.containerNumber) {
-        containerNumbers.add(item.containerNumber);
-      }
-    });
-    
-    if (containerNumbers.size > 0) {
-      Array.from(containerNumbers).forEach((container: string, index: number) => {
-        drawText(container, 300, 335 + (index * 15))
-      })
-    } else {
-      drawText('N/A', 300, 335)
-    }
-    
-    // Draw horizontal line
-    drawLine(50, 385, width - 50, 385, 1.5)
-
-    // Product Information
-    drawText('PRODUCT:', 50, 405, { font: boldFont, size: 12 })
-    
-    // Get unique products from items
-    const uniqueProducts = new Set<string>()
-    bolDocument.items?.forEach((item: any) => {
-      if (item.description) {
-        uniqueProducts.add(item.description)
-      }
-    })
-    
-    // Draw product information
-    let currentY = 420
-    Array.from(uniqueProducts).forEach((product: string, index: number) => {
-      drawText(product, 50, currentY)
-      currentY += 20
-    })
-    
-    // Port Information
-    drawText('PORT OF LOADING:', 50, currentY + 20, { font: boldFont, size: 12 })
-    drawText(bolDocument.bolData?.portOfLoading || 'N/A', 170, currentY + 20)
-    
-    drawText('PORT OF DISCHARGE:', 300, currentY + 20, { font: boldFont, size: 12 })
-    drawText(bolDocument.bolData?.portOfDischarge || 'N/A', 430, currentY + 20)
-    
-    // Draw horizontal line
-    drawLine(50, currentY + 40, width - 50, currentY + 40, 1.5)
-    
-    // Origin Declaration
-    const declarationY = currentY + 70
-    drawText('U.S.A. ORIGIN', width / 2, declarationY, { 
-      font: boldFont, 
-      size: 18, 
-      align: 'center', 
-      maxWidth: width 
-    })
-    
-    // Signature Section
-    const signatureY = declarationY + 50
-    
-    // Try to get a random signature from assets
-    let signatureImage;
-    try {
-      // Find all signatures for Tomas
-      const signatures = await Asset.find({ 
-        type: 'signature', 
-        name: { $regex: /Tomas signature/i } 
       });
-      
-      // Randomly select one if multiple are available
-      const signature = signatures.length > 0 
-        ? signatures[Math.floor(Math.random() * signatures.length)] 
-        : await Asset.findOne({ type: 'signature' });
-      
-      if (signature && mongoose.connection.db) {
-        const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-          bucketName: 'assets'
-        });
-        
-        const fileId = typeof signature.fileId === 'string' 
-          ? new mongoose.Types.ObjectId(signature.fileId)
-          : signature.fileId;
-          
-        const downloadStream = bucket.openDownloadStream(fileId);
-        
-        // Convert stream to buffer
-        const chunks: Buffer[] = [];
-        for await (const chunk of downloadStream) {
-          chunks.push(Buffer.from(chunk));
+    }
+
+    // Extract unique product descriptions
+    const uniqueProducts = new Set<string>();
+    
+    if (bolDocument.items && bolDocument.items.length > 0) {
+      bolDocument.items.forEach((item: any) => {
+        if (item.description) {
+          uniqueProducts.add(item.description);
         }
-        const buffer = Buffer.concat(chunks);
-        
-        // Embed signature image
-        if (signature.contentType.startsWith('image/')) {
-          if (signature.contentType === 'image/png') {
-            signatureImage = await pdfDoc.embedPng(buffer);
-          } else if (signature.contentType === 'image/jpeg' || signature.contentType === 'image/jpg') {
-            signatureImage = await pdfDoc.embedJpg(buffer);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error embedding signature:', error);
-      // Continue without signature image if there's an error
+      });
     }
     
-    // Draw signature
-    if (signatureImage) {
-      // Calculate signature dimensions (maintain aspect ratio, max width 150)
-      const signatureWidth = Math.min(150, signatureImage.width);
-      const signatureHeight = signatureImage.height * (signatureWidth / signatureImage.width);
-      
-      page.drawImage(signatureImage, {
-        x: 50,
-        y: height - (signatureY + 30),
-        width: signatureWidth,
-        height: signatureHeight,
-      });
-    } else {
-      // Signature line if no image
-      drawLine(50, signatureY + 40, 250, signatureY + 40, 1);
-    }
-    
-    drawText('Tomas Alvarez', 50, signatureY + 55)
-    drawText('Vice President of Latin America', 50, signatureY + 70)
-    drawText('Texas Worldwide Oil Services LLC', 50, signatureY + 85)
-    drawText('6300 N Main Rd, Houston, TX 77009, USA', 50, signatureY + 100)
-    
-    // Notary Section
-    const notaryY = signatureY + 130
-    drawText('NOTARIZATION', width / 2, notaryY, { 
-      font: boldFont, 
-      size: 14, 
-      align: 'center', 
-      maxWidth: width 
-    })
-    
-    // Get notary statement from assets
-    let notaryStatementText = '';
-    try {
-      const notaryStatement = await Asset.findOne({ 
-        type: 'notary_seal', 
-        name: { $regex: /Notary Statements/i } 
-      });
-      
-      if (notaryStatement && notaryStatement.description) {
-        notaryStatementText = notaryStatement.description;
-      }
-    } catch (error) {
-      console.error('Error getting notary statement:', error);
-    }
+    // Get authenticated user's name
+    const userName = session.user?.name || 'Authorized Representative';
 
-    // Draw notary statement with proper formatting
-    drawText('CITY: Houston', 117, notaryY + 25)
-    drawText('COUNTY: Harris', 278, notaryY + 25)
-    drawText('STATE: TX', 428, notaryY + 25)
+    // Draw header
+    drawDocumentHeader(
+      page,
+      { font, boldFont },
+      { width, height, margin, contentWidth },
+      { formattedBusinessDay, logoImage },
+      { drawText, drawLine }
+    );
 
-    // Format the notary date with ordinal suffix
-    const notaryDay = notaryDate.getDate();
-    let daySuffix = 'th';
-    if (notaryDay === 1 || notaryDay === 21 || notaryDay === 31) daySuffix = 'st';
-    if (notaryDay === 2 || notaryDay === 22) daySuffix = 'nd';
-    if (notaryDay === 3 || notaryDay === 23) daySuffix = 'rd';
+    // Draw body content
+    const currentY = drawDocumentBody(
+      page,
+      { font, boldFont, italicFont },
+      { width, height, margin, contentWidth },
+      { client, bolDocument, containers, uniqueProducts },
+      { drawText, drawLine, drawRect }
+    );
 
-    // Month names
-    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
-                        'July', 'August', 'September', 'October', 'November', 'December'];
-    const monthName = monthNames[notaryDate.getMonth()];
+    // Draw signature and notary
+    drawSignatureAndNotary(
+      page,
+      { font, boldFont, italicFont },
+      { width, height, margin, contentWidth },
+      { 
+        currentY, 
+        signatureImage, 
+        notarySignatureImage, 
+        notarySealImage, 
+        businessDateObj,
+        userName
+      },
+      { drawText, drawLine, drawRect, getOrdinalSuffix }
+    );
 
-    // Draw the notary date line
-    drawText('On this', 117, notaryY + 50)
-    drawText(`${notaryDay}${daySuffix}`, 179, notaryY + 50, { font: boldFont })
-    drawText('day of', 229, notaryY + 50)
-    drawText(`${monthName}`, 305, notaryY + 50, { font: boldFont })
-    drawText(`, ${notaryDate.getFullYear()}`, 395, notaryY + 50)
-    drawText(', personally appeared before me,', 623, notaryY + 50, { align: 'right', maxWidth: 200 })
-    drawText('Tomas Alvarez', 722, notaryY + 50, { font: boldFont, align: 'right', maxWidth: 100 })
+    // Draw footer
+    drawDocumentFooter(
+      page,
+      { font },
+      { width, height, margin, contentWidth },
+      { drawText, drawLine }
+    );
 
-    // Business address line
-    drawText('doing business at', 169, notaryY + 85)
-    drawText('4743 Merwin St, Houston, TX 77027', 366, notaryY + 85, { font: boldFont })
-    drawText('personally known or sufficiently identified to me,', 839, notaryY + 85, { align: 'right', maxWidth: 300 })
-
-    // Certification line
-    drawText('who certifies that', 166, notaryY + 113)
-    drawText('he is', 334, notaryY + 113, { font: boldFont })
-    drawText('(is) (are) the individual (s) who executed the foregoing instrument and', 839, notaryY + 113, { align: 'right', maxWidth: 500 })
-
-    // Acknowledgment line
-    drawText('acknowledge it to be', 178, notaryY + 143)
-    drawText('of', 306, notaryY + 143, { font: boldFont })
-    drawText('free act and deed.', 447, notaryY + 143)
-
-    // Try to get notary signature from assets
-    let notarySignatureImage;
-    try {
-      const notarySignature = await Asset.findOne({ 
-        type: 'notary_seal', 
-        name: { $regex: /Notary signature/i } 
-      });
-      
-      if (notarySignature && mongoose.connection.db) {
-        const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-          bucketName: 'assets'
-        });
-        
-        const fileId = typeof notarySignature.fileId === 'string' 
-          ? new mongoose.Types.ObjectId(notarySignature.fileId)
-          : notarySignature.fileId;
-          
-        const downloadStream = bucket.openDownloadStream(fileId);
-        
-        // Convert stream to buffer
-        const chunks: Buffer[] = [];
-        for await (const chunk of downloadStream) {
-          chunks.push(Buffer.from(chunk));
-        }
-        const buffer = Buffer.concat(chunks);
-        
-        // Embed notary signature image
-        if (notarySignature.contentType.startsWith('image/')) {
-          if (notarySignature.contentType === 'image/png') {
-            notarySignatureImage = await pdfDoc.embedPng(buffer);
-          } else if (notarySignature.contentType === 'image/jpeg' || notarySignature.contentType === 'image/jpg') {
-            notarySignatureImage = await pdfDoc.embedJpg(buffer);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error embedding notary signature:', error);
-    }
-
-    // Draw notary signature if available
-    if (notarySignatureImage) {
-      const signatureWidth = Math.min(150, notarySignatureImage.width);
-      const signatureHeight = notarySignatureImage.height * (signatureWidth / notarySignatureImage.width);
-      
-      page.drawImage(notarySignatureImage, {
-        x: 722 - signatureWidth,
-        y: height - (notaryY + 170),
-        width: signatureWidth,
-        height: signatureHeight,
-      });
-    }
-
-    // Try to get notary seal from assets
-    let notarySealImage;
-    try {
-      const notarySeal = await Asset.findOne({ 
-        type: 'notary_seal', 
-        name: { $regex: /Notary Seal Only/i } 
-      });
-      
-      let sealAsset = notarySeal;
-      if (!sealAsset) {
-        // Fallback to any notary seal
-        sealAsset = await Asset.findOne({ type: 'notary_seal' });
-      }
-      
-      if (sealAsset && mongoose.connection.db) {
-        const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-          bucketName: 'assets'
-        });
-        
-        const fileId = typeof sealAsset.fileId === 'string' 
-          ? new mongoose.Types.ObjectId(sealAsset.fileId)
-          : sealAsset.fileId;
-          
-        const downloadStream = bucket.openDownloadStream(fileId);
-        
-        // Convert stream to buffer
-        const chunks: Buffer[] = [];
-        for await (const chunk of downloadStream) {
-          chunks.push(Buffer.from(chunk));
-        }
-        const buffer = Buffer.concat(chunks);
-        
-        // Embed notary seal image
-        if (sealAsset.contentType.startsWith('image/')) {
-          if (sealAsset.contentType === 'image/png') {
-            notarySealImage = await pdfDoc.embedPng(buffer);
-          } else if (sealAsset.contentType === 'image/jpeg' || sealAsset.contentType === 'image/jpg') {
-            notarySealImage = await pdfDoc.embedJpg(buffer);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error embedding notary seal:', error);
-      // Continue without notary seal image if there's an error
-    }
-
-    // Draw notary seal
-    if (notarySealImage) {
-      // Calculate seal dimensions (maintain aspect ratio, max width 200)
-      const sealWidth = Math.min(200, notarySealImage.width);
-      const sealHeight = notarySealImage.height * (sealWidth / notarySealImage.width);
-      
-      page.drawImage(notarySealImage, {
-        x: 250,
-        y: height - (notaryY + 170),
-        width: sealWidth,
-        height: sealHeight,
-      });
-    } else {
-      // Draw a rectangle for the notary seal if no image
-      drawRect(250, notaryY + 150, 200, 100, {
-        borderWidth: 1,
-        borderColor: [0, 0, 0]
-      });
-      
-      drawText('OFFICIAL SEAL', 350, notaryY + 200, { 
-        font: italicFont, 
-        size: 12,
-        align: 'center',
-        maxWidth: 200
-      });
-    }
-
-    drawText('(Notary Public)', 722, notaryY + 180, { 
-      font: italicFont, 
-      size: 10,
-      align: 'right',
-      maxWidth: 100
-    })
-    
-    // Footer
-    drawText('This Certificate of Origin is issued in accordance with international trade practices.', 
-      width / 2, height - 50, { 
-        size: 8, 
-        align: 'center', 
-        maxWidth: width - 100 
-      })
-
-    // Generate PDF bytes
+    // Save the PDF
     const pdfBytes = await pdfDoc.save()
 
-    // Create a buffer from the PDF bytes
-    const buffer = Buffer.from(pdfBytes)
-
-    // Store in GridFS
+    // Connect to GridFS
     if (!mongoose.connection.db) {
-      return NextResponse.json(
-        { error: 'Database connection not available' },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: 'Database connection not available' }, { status: 500 })
     }
     
     const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
       bucketName: 'documents'
     })
 
-    const uploadStream = bucket.openUploadStream(`${certificateNumber}.pdf`, {
+    // Generate filename with BOL number
+    const fileName = `${bolDocument.bolData?.bolNumber || client.name.replace(/\s+/g, '_')}-COO.pdf`
+
+    // Upload the file to GridFS
+    const uploadStream = bucket.openUploadStream(fileName, {
+      contentType: 'application/pdf',
       metadata: {
-        contentType: 'application/pdf',
         bolId: bolDocument._id
       }
     })
 
-    // Upload to GridFS
+    // Convert Uint8Array to Buffer and upload
+    const buffer = Buffer.from(pdfBytes)
     await new Promise((resolve, reject) => {
       const readStream = require('stream').Readable.from(buffer)
       readStream
@@ -668,51 +827,29 @@ export async function POST(
         .on('finish', resolve)
     })
 
-    // Create document record
-    const coo = await Document.create({
-      clientId: bolDocument.clientId,
-      fileName: `${certificateNumber}.pdf`,
+    // Create a new document record
+    const newDocument = await Document.create({
+      clientId: client._id,
+      fileName,
       fileId: uploadStream.id,
       type: 'COO',
       relatedBolId: bolDocument._id,
-      cooData: {
-        certificateNumber,
-        dateOfIssue: documentDate,
-        exporterInfo: {
-          name: 'Texas Worldwide Oil Services, LLC',
-          address: '6300 N Main Rd, Houston, TX 77009, USA',
-          taxId: '38-4120041'
-        },
-        importerInfo: {
-          name: client.name,
-          address: client.address || '',
-          taxId: client.rif || ''
-        },
-        productInfo: bolDocument.items?.map((item: any) => ({
-          description: item.description,
-          hsCode: '2710.19.30', // Default HS code for base oils
-          origin: 'USA',
-          quantity: {
-            value: parseFloat(item.quantity.litros.replace(/,/g, '')),
-            unit: 'L'
-          }
-        })) || []
-      }
+      createdAt: new Date(),
+      updatedAt: new Date()
     })
 
     return NextResponse.json({
-      success: true,
       document: {
-        id: coo._id,
-        type: coo.type,
-        fileName: coo.fileName
+        _id: newDocument._id,
+        fileName: newDocument.fileName,
+        type: newDocument.type
       }
     })
   } catch (error) {
-    console.error('Error generating certificate of origin:', error)
+    console.error('Error generating Certificate of Origin:', error)
     return NextResponse.json(
-      { error: 'Failed to generate certificate of origin' },
+      { error: 'Error generating Certificate of Origin' },
       { status: 500 }
     )
   }
-} 
+}
