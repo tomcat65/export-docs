@@ -132,23 +132,57 @@ export async function POST(request: NextRequest) {
 
     await connectDB()
 
-    // Get GridFS bucket
-    const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db!, {
-      bucketName: 'documents'
-    })
-
-    // Clean up duplicate BOLs
-    const duplicatesDeleted = await cleanupDuplicates(bucket)
+    // Check if we should only clean COO documents (from the request)
+    let cleanupCooOnly = false;
+    try {
+      const requestData = await request.json();
+      cleanupCooOnly = !!requestData.cleanupCooOnly;
+    } catch (error) {
+      // If JSON parsing fails, assume default behavior
+      console.warn('Failed to parse request body:', error);
+    }
     
-    // Clean up orphaned documents
-    const orphansDeleted = await cleanupOrphans(bucket)
-
-    return NextResponse.json({
-      success: true,
-      duplicatesDeleted,
-      orphansDeleted,
-      message: `Cleanup completed: ${duplicatesDeleted} duplicates and ${orphansDeleted} orphaned documents deleted`
-    })
+    // Create GridFS buckets for both possible locations
+    const documentsBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db!, {
+      bucketName: 'documents'
+    });
+    
+    const fsBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db!, {
+      bucketName: 'fs'
+    });
+    
+    let duplicatesDeleted = 0;
+    let orphansDeleted = 0;
+    let cooDeleted = 0;
+    
+    // Clean only COO documents if requested
+    if (cleanupCooOnly) {
+      cooDeleted = await cleanupCooDuplicates(fsBucket);
+      
+      return NextResponse.json({
+        success: true,
+        cooDeleted,
+        message: `COO cleanup completed: ${cooDeleted} COO documents deleted`
+      });
+    } else {
+      // Regular cleanup
+      duplicatesDeleted = await cleanupDuplicates(documentsBucket);
+      orphansDeleted = await cleanupOrphans(documentsBucket); 
+      
+      // Also clean up documents in 'fs' bucket
+      try {
+        await cleanupOrphans(fsBucket);
+      } catch (error) {
+        console.error('Error cleaning up fs bucket:', error);
+      }
+      
+      return NextResponse.json({
+        success: true,
+        duplicatesDeleted,
+        orphansDeleted,
+        message: `Cleanup completed: ${duplicatesDeleted} duplicates and ${orphansDeleted} orphaned documents deleted`
+      });
+    }
   } catch (error) {
     console.error('Error cleaning up documents:', error)
     return NextResponse.json(
@@ -156,4 +190,46 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     )
   }
+}
+
+// Clean up all COO documents for a fresh start
+async function cleanupCooDuplicates(bucket: any) {
+  console.log('Starting COO document cleanup...');
+  
+  // Find all COO documents
+  const cooDocs = await Document.find({ type: 'COO' }).lean();
+  console.log(`Found ${cooDocs.length} COO documents to clean up`);
+  
+  let deletedCount = 0;
+  
+  // Delete each COO document and its file
+  for (const doc of cooDocs) {
+    try {
+      // Delete file from GridFS if it exists
+      if (doc.fileId) {
+        try {
+          const fileIdStr = doc.fileId.toString();
+          console.log(`Attempting to delete COO file ${fileIdStr} from GridFS`);
+          const objectId = new mongoose.Types.ObjectId(fileIdStr);
+          await bucket.delete(objectId);
+          console.log(`Deleted COO file ${fileIdStr} from GridFS`);
+        } catch (error) {
+          // File might not exist, just log and continue
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.warn(`Error deleting file ${doc.fileId}, it may not exist: ${errorMessage}`);
+        }
+      }
+      
+      // Delete document from MongoDB
+      await Document.findByIdAndDelete(doc._id);
+      deletedCount++;
+      console.log(`Deleted COO document: ${doc._id}`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`Error deleting COO document ${doc._id}: ${errorMessage}`);
+    }
+  }
+  
+  console.log(`Completed COO cleanup: ${deletedCount} documents deleted`);
+  return deletedCount;
 } 

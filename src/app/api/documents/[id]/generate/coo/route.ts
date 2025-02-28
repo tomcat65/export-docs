@@ -48,326 +48,626 @@ type DocumentData = {
   uniqueProducts: Set<string>;
 }
 
-type SignatureAssets = {
-  currentY: number;
+interface SignatureSectionData {
   signatureImage: PDFImage | undefined;
+  signatoryName: string;
+  signatoryTitle: string;
+  signatoryCompany: string;
+  signatoryAddress: string;
+  signatoryContact: string;
+}
+
+interface NotaryFooterData {
   notarySignatureImage: PDFImage | undefined;
   notarySealImage: PDFImage | undefined;
-  businessDateObj: Date;
-  userName: string;
+  notaryDate: {
+    city: string;
+    county: string;
+    state: string;
+    day: string;
+    month: string;
+    year: string;
+  };
+  notaryInfo: {
+    name: string;
+    id: string;
+    expirationDate: string;
+  };
 }
 
-// Draw document header: logo, title, and date
+// Fix the logo in drawDocumentHeader
 function drawDocumentHeader(
   page: PDFPage,
-  { font, boldFont }: FontConfig,
-  { width, height, margin, contentWidth }: PageConfig,
-  { formattedBusinessDay, logoImage }: HeaderAssets,
-  { drawText, drawLine }: DrawFunctions
+  pdfDoc: PDFDocument,
+  fonts: {
+    regular: PDFFont;
+    bold: PDFFont;
+  },
+  logoImage: PDFImage | undefined,
+  date: string,
+  clientData: {
+    name: string;
+    address: string[];
+    taxId: string;
+  }
 ) {
-  // Draw logo
+  const { width, height } = page.getSize();
+  
+  // Logo section - adjust size to 80% of the current size
   if (logoImage) {
-    const logoWidth = 70;
-    const logoHeight = logoImage.height * (logoWidth / logoImage.width);
+    // Get logo dimensions
+    const originalWidth = logoImage.width;
+    const originalHeight = logoImage.height;
+    
+    // Set width to 80% of the previous 125px value (= 100px)
+    const logoWidth = 100; // Reduced to 80% of 125px
+    const logoHeight = (logoWidth / originalWidth) * originalHeight;
     
     page.drawImage(logoImage, {
-      x: margin.left,
-      y: height - margin.top - 20,
+      x: 50,
+      y: height - 95, // Keeping the same position
       width: logoWidth,
-      height: logoHeight,
+      height: logoHeight
     });
   }
   
-  // Draw document date at top left where logo is
-  drawText(formattedBusinessDay, margin.left, margin.top + 40, { font: font, size: 11 });
+  // Date - format to match the sample (November 01, 2024)
+  const dateObj = new Date();
+  const month = dateObj.toLocaleString('en-US', { month: 'long' });
+  const day = dateObj.getDate().toString().padStart(2, '0');
+  const year = dateObj.getFullYear();
+  const formattedDate = `${month} ${day}, ${year}`;
   
-  // Draw document title - centered
-  drawText('CERTIFICATE OF ORIGIN', width / 2, margin.top + 70, { 
-    font: boldFont, 
-    size: 14, // Slightly smaller to prevent overflow
-    align: 'center'
+  page.drawText(formattedDate, {
+    x: 50,
+    y: height - 115,
+    size: 10,
+    font: fonts.regular
   });
+  
+  // Title centered with proper spacing and font
+  const title = "CERTIFICATE OF ORIGIN";
+  const titleWidth = fonts.bold.widthOfTextAtSize(title, 16);
+  page.drawText(title, {
+    x: (width - titleWidth) / 2,
+    y: height - 135,
+    size: 16,
+    font: fonts.bold
+  });
+  
+  return height - 160; // Return Y coordinate for next section
 }
 
-// Draw document body: consignee info, booking details, container table, products
+// Adjust the spacing in drawDocumentBody
 function drawDocumentBody(
   page: PDFPage,
-  { font, boldFont, italicFont }: FontConfig,
-  { width, height, margin, contentWidth }: PageConfig,
-  { client, bolDocument, containers, uniqueProducts }: DocumentData,
-  { drawText, drawLine, drawRect }: DrawFunctions
+  pdfDoc: PDFDocument,
+  fonts: {
+    regular: PDFFont;
+    bold: PDFFont;
+  },
+  yStart: number,
+  data: {
+    buyerName: string;
+    buyerAddress: string[];
+    buyerTaxId: string;
+    bolNumber: string;
+    vesselName: string;
+    voyageNumber: string;
+    containers: Array<{containerNumber: string, sealNumber: string}>;
+    productName: string;
+    portOfLoading: string;
+    portOfDischarge: string;
+  }
 ) {
-  let currentY = margin.top + 120; // Start below the header
+  const { width } = page.getSize()
+  const margin = 50
+  const contentWidth = width - (margin * 2)
+  const lineHeight = 14
+  const compactLineHeight = 12 // For smaller spacing in some sections
   
-  // Draw buyer information
-  drawText('Buyer:', margin.left, currentY, { font: boldFont, size: 10 });
-  currentY += 15;
-  drawText(client.name, margin.left, currentY, { size: 10 });
-  currentY += 15;
-  drawText(`RIF: ${client.rif}`, margin.left, currentY, { size: 10 });
-  currentY += 20;
+  let currentY = yStart
 
-  // Extract maritime booking and vessel information
-  const bookingNumber = bolDocument.bolData?.bookingNumber || 'N/A';
-  const vessel = bolDocument.bolData?.vessel || 'N/A';
-  const voyage = bolDocument.bolData?.voyage || 'N/A';
+  // Section title - Buyer
+  page.drawText('BUYER:', {
+    x: margin,
+    y: currentY,
+    size: 10,
+    font: fonts.bold
+  })
+  currentY -= lineHeight * 1.2
+
+  // First line: Company name with C.A.
+  page.drawText(`${data.buyerName}, C.A.`, {
+    x: margin,
+    y: currentY,
+    size: 10,
+    font: fonts.regular
+  })
+  currentY -= lineHeight
+
+  // Get the full address as string
+  const fullAddressText = data.buyerAddress.join(", ");
   
-  // Log for debugging
-  console.log('BOL Data for COO generation:', {
-    bookingNumber,
-    vessel,
-    voyage,
-    dateOfIssue: bolDocument.bolData?.dateOfIssue,
+  // Find a natural break point for the address (ideally around the middle)
+  const splitPoint = Math.floor(fullAddressText.length / 2);
+  
+  // Find a comma near the midpoint for a clean break
+  let breakIndex = fullAddressText.indexOf(',', splitPoint - 10);
+  if (breakIndex === -1 || breakIndex > splitPoint + 20) {
+    // If no comma found near midpoint, or it's too far, look for a space
+    breakIndex = fullAddressText.indexOf(' ', splitPoint);
+  }
+  
+  // Fallback if no good split point found
+  if (breakIndex === -1) {
+    breakIndex = splitPoint;
+  }
+  
+  // Create the two address lines
+  const addressLine1 = fullAddressText.substring(0, breakIndex + 1).trim();
+  const addressLine2 = fullAddressText.substring(breakIndex + 1).trim();
+  
+  // Second line: First part of address
+  page.drawText(addressLine1, {
+    x: margin,
+    y: currentY,
+    size: 10,
+    font: fonts.regular
+  })
+  currentY -= lineHeight
+  
+  // Third line: Second part of address
+  page.drawText(addressLine2, {
+    x: margin,
+    y: currentY,
+    size: 10,
+    font: fonts.regular
+  })
+  currentY -= lineHeight
+  
+  // Fourth line: RIF number
+  page.drawText(`RIF ${data.buyerTaxId}`, {
+    x: margin,
+    y: currentY,
+    size: 10,
+    font: fonts.regular
+  })
+  currentY -= lineHeight * 2 // Keep the same total spacing after buyer info
+
+  // Maritime Booking Section
+  page.drawText("Maritime Booking:", {
+    x: margin,
+    y: currentY,
+    size: 10,
+    font: fonts.bold
+  })
+  currentY -= lineHeight
+  
+  // BOL Number with proper alignment
+  if (data.bolNumber) {
+    page.drawText("BOL Number:", {
+      x: margin,
+      y: currentY,
+      size: 10,
+      font: fonts.bold
+    });
+    
+    page.drawText(data.bolNumber, {
+      x: margin + 130,
+      y: currentY,
+      size: 10,
+      font: fonts.regular
+    });
+    currentY -= lineHeight
+  }
+  
+  // Container vessel with proper alignment
+  if (data.vesselName) {
+    page.drawText("Container vessel:", {
+      x: margin,
+      y: currentY,
+      size: 10,
+      font: fonts.bold
+    });
+    
+    page.drawText(`${data.vesselName}${data.voyageNumber ? ' / Voyage ' + data.voyageNumber : ''}`, {
+      x: margin + 130,
+      y: currentY,
+      size: 10,
+      font: fonts.regular
+    });
+    currentY -= lineHeight
+  }
+  
+  // Containers and Seals - improved table format with smaller spacing
+  if (data.containers.length > 0) {
+    page.drawText("Containers and Seals:", {
+      x: margin,
+      y: currentY,
+      size: 10,
+      font: fonts.bold
+    });
+    currentY -= compactLineHeight
+    
+    // Create a proper table with two columns
+    // Table headers with proper formatting and alignment
+    const containerLabel = "Container";
+    const sealLabel = "Load seal";
+    
+    // Create container column
+    const containerX = margin + 80;
+    page.drawText(containerLabel, {
+      x: containerX,
+      y: currentY,
+      size: 10, // Reduced font size
+      font: fonts.bold
+    });
+    
+    // Create seal column
+    const sealX = margin + 280;
+    page.drawText(sealLabel, {
+      x: sealX,
+      y: currentY,
+      size: 10, // Reduced font size
+      font: fonts.bold
+    });
+    currentY -= compactLineHeight
+    
+    // Container rows with better alignment and smaller spacing
+    for (const container of data.containers) {
+      page.drawText(container.containerNumber, {
+        x: containerX,
+        y: currentY,
+        size: 10, // Reduced font size
+        font: fonts.regular
+      });
+      
+      page.drawText(container.sealNumber, {
+        x: sealX,
+        y: currentY,
+        size: 10, // Reduced font size
+        font: fonts.regular
+      });
+      currentY -= compactLineHeight // Using compact line height
+    }
+  }
+  
+  // Product and Ports info
+  currentY -= lineHeight
+  
+  // Product name
+  page.drawText("Product name:", {
+    x: margin,
+    y: currentY,
+    size: 10,
+    font: fonts.bold
   });
   
-  // Draw maritime booking information
-  drawText('Maritime Booking:', margin.left, currentY, { font: boldFont, size: 10 });
-  currentY += 15;
-  drawText(`${bookingNumber}`, margin.left, currentY, { size: 10 });
-  currentY += 15;
-  drawText(`Vessel / Voyage: ${vessel} / ${voyage}`, margin.left, currentY, { size: 10 });
-  currentY += 20;
-
-  // Draw container and seal table header
-  drawText('Container', margin.left, currentY, { font: boldFont, size: 8 });
-  drawText('Seal', margin.left + 200, currentY, { font: boldFont, size: 8 });
-  currentY += 10;
+  // Format product name to match sample (Base Oil Group II, ARAMCO PRIMA 600N)
+  const formattedProductName = data.productName
+    .replace(/flexi tank/i, '')
+    .replace(/base oil group ii/i, 'Base Oil Group II,')
+    .replace(/600n/i, '600N')
+    .toUpperCase();
   
-  // Draw line under header
-  drawLine(margin.left, currentY, margin.left + contentWidth, currentY);
-  currentY += 5;
-
-  // Draw container and seal table rows with smaller font and tighter spacing
-  if (containers && containers.length > 0) {
-    containers.forEach(({ containerNumber, sealNumber }) => {
-      drawText(containerNumber, margin.left, currentY, { size: 8 });
-      drawText(sealNumber, margin.left + 200, currentY, { size: 8 });
-      currentY += 10; // Reduced row spacing even further to match sample
-    });
-  } else if (bolDocument.items && bolDocument.items.length > 0) {
-    bolDocument.items.forEach((item: any) => {
-      drawText(item.containerNumber, margin.left, currentY, { size: 8 });
-      drawText(item.seal, margin.left + 200, currentY, { size: 8 });
-      currentY += 10; // Reduced row spacing to match sample
-    });
-  } else {
-    drawText('No container data available', margin.left, currentY, { size: 8, color: [0.6, 0.6, 0.6] });
-    currentY += 10;
-  }
-
-  // Draw line after the container table
-  drawLine(margin.left, currentY, margin.left + contentWidth, currentY);
-  currentY += 20;
-
-  // Draw product information
-  drawText('Product:', margin.left, currentY, { font: boldFont, size: 10 });
-  currentY += 15;
-  
-  // Get product descriptions
-  const products = Array.from(uniqueProducts).map(desc => desc);
-
-  // Draw product descriptions
-  if (products.length > 0) {
-    products.forEach((product, index) => {
-      // Format as "1. 1 FLEXI TANK Base Oil Group II 600N"
-      drawText(`${index + 1}. ${product}`, margin.left, currentY, { size: 9 });
-      currentY += 15;
-    });
-  } else {
-    drawText('No product data available', margin.left, currentY, { size: 9, color: [0.6, 0.6, 0.6] });
-    currentY += 15;
-  }
-
-  // Draw port information
-  const portOfLoading = bolDocument.bolData?.portOfLoading || 'N/A';
-  const portOfDischarge = bolDocument.bolData?.portOfDischarge || 'N/A';
-  
-  drawText(`Port of loading: ${portOfLoading}`, margin.left, currentY, { size: 9 });
-  currentY += 15;
-  drawText(`Port of discharge: ${portOfDischarge}`, margin.left, currentY, { size: 9 });
-  currentY += 30;
-
-  // Draw U.S.A. ORIGIN text centered with reduced font size
-  drawText('U.S.A. ORIGIN', width / 2, currentY, { 
-    font: boldFont, 
-    size: 14, 
-    align: 'center' 
+  page.drawText(formattedProductName, {
+    x: margin + 130,
+    y: currentY,
+    size: 10,
+    font: fonts.regular
   });
-  currentY += 30;
-
-  return currentY;
+  currentY -= lineHeight
+  
+  // Port of loading with "/ USA" added to match sample
+  page.drawText("Port of loading:", {
+    x: margin,
+    y: currentY,
+    size: 10,
+    font: fonts.bold
+  });
+  
+  page.drawText(data.portOfLoading + " / USA", {
+    x: margin + 130,
+    y: currentY,
+    size: 10,
+    font: fonts.regular
+  });
+  currentY -= lineHeight
+  
+  // Port of discharge with "/ Venezuela" added to match sample
+  page.drawText("Port of discharge:", {
+    x: margin,
+    y: currentY,
+    size: 10,
+    font: fonts.bold
+  });
+  
+  page.drawText(data.portOfDischarge + " / Venezuela", {
+    x: margin + 130,
+    y: currentY,
+    size: 10,
+    font: fonts.regular
+  });
+  currentY -= lineHeight
+  
+  // Add more space between Port of discharge and certification text
+  currentY -= lineHeight
+  
+  // Certification text
+  const certText = "In accordance with the above mentioned shipment we certify that above goods are of";
+  const certTextWidth = fonts.regular.widthOfTextAtSize(certText, 10);
+  page.drawText(certText, {
+    x: (width - certTextWidth) / 2,
+    y: currentY,
+    size: 10,
+    font: fonts.regular
+  });
+  
+  // Add more space between certification text and USA ORIGIN
+  currentY -= lineHeight * 1.5
+  
+  // U.S.A. ORIGIN text - reduced size
+  const originText = "U.S.A. ORIGIN";
+  const originTextWidth = fonts.bold.widthOfTextAtSize(originText, 20); // Reduced from 22 to 20
+  page.drawText(originText, {
+    x: (width - originTextWidth) / 2,
+    y: currentY,
+    size: 20, // Reduced from 22
+    font: fonts.bold
+  });
+  
+  // Return a larger spacing after the U.S.A. ORIGIN text
+  return currentY - lineHeight * 1.5; // Increased spacing to lower "Yours faithfully"
 }
 
-// Draw document signature and notary section
-function drawSignatureAndNotary(
+// Fix the signature section to properly position elements and match the sample
+function drawSignatureSection(
   page: PDFPage,
-  { font, boldFont, italicFont }: FontConfig,
-  { width, height, margin, contentWidth }: PageConfig,
-  { currentY, signatureImage, notarySignatureImage, notarySealImage, businessDateObj, userName }: SignatureAssets,
-  { drawText, drawLine, drawRect, getOrdinalSuffix }: DrawFunctions
+  pdfDoc: PDFDocument,
+  fonts: {
+    regular: PDFFont;
+    bold: PDFFont;
+  },
+  yStart: number,
+  data: SignatureSectionData
 ) {
-  // 1. SIGNATURE BLOCK - More compact
-  currentY += 25; // Reduced spacing
-  drawText('Yours faithfully,', margin.left, currentY, { size: 10 });
+  const lineHeight = 14;
+  const compactLineHeight = 12; // Smaller line height for signature block
   
-  // Draw signature
-  currentY += 15; // Reduced spacing
-  if (signatureImage) {
-    const signatureWidth = Math.min(90, signatureImage.width); // Slightly smaller
-    const signatureHeight = signatureImage.height * (signatureWidth / signatureImage.width);
-    
-    page.drawImage(signatureImage, {
-      x: margin.left,
-      y: height - (currentY + 30),
-      width: signatureWidth,
-      height: signatureHeight,
-    });
-    
-    currentY += signatureHeight + 5; // Reduced spacing
-  } else {
-    // Signature line if no image
-    drawLine(margin.left, currentY + 30, margin.left + 150, currentY + 30, 1);
-    currentY += 35; // Reduced spacing
-  }
+  // Start with "Yours faithfully" text - position similar to sample but lowered
+  let currentY = yStart - 20; // Increased from 10 to 20 to lower it further
   
-  // Signature details with more compact spacing
-  drawText(`${userName},`, margin.left, currentY, { size: 10 });
-  currentY += 15;
-  drawText('Vicepresident Latin America', margin.left, currentY, { size: 10 });
-  currentY += 15;
-  drawText('Texas Worldwide Oil Services LLC', margin.left, currentY, { size: 10 });
-  currentY += 15;
-  drawText('4743 Merwin St, Houston TX 77027', margin.left, currentY, { size: 10 });
-  currentY += 15;
-  drawText('USA Direct +1(713) 309-6637', margin.left, currentY, { size: 10 });
-  
-  // 2. NOTARY SECTION - Make sure it fits on the page
-  currentY += 15; // Reduced spacing more to avoid overlap with footer
-  
-  // Ensure the notary section has enough space, or adjust position
-  const remainingSpace = height - margin.bottom - currentY;
-  const notaryHeight = 110; // Reduced approximate height needed for notary section
-  
-  if (remainingSpace < notaryHeight) {
-    // Move up some elements if there's not enough space
-    currentY = height - margin.bottom - notaryHeight;
-  }
-  
-  // Draw notary statement with proper formatting - more compact
-  drawText('CITY: Houston', margin.left, currentY, { size: 9 });
-  drawText('COUNTY: Harris', margin.left + 150, currentY, { size: 9 });
-  drawText('STATE: TX', margin.left + 300, currentY, { size: 9 });
-
-  // Format the notary date with ordinal suffix
-  const notaryDateObj = businessDateObj;
-  const notaryDay = notaryDateObj.getDate();
-  const daySuffix = getOrdinalSuffix?.(notaryDay) || '';
-  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
-                      'July', 'August', 'September', 'October', 'November', 'December'];
-  const monthName = monthNames[notaryDateObj.getMonth()];
-
-  // Draw the notary date line
-  currentY += 18; // Reduced spacing
-  const notaryLineY = currentY;
-  drawText('On this', margin.left, currentY, { size: 9 });
-  drawText(`${notaryDay}${daySuffix}`, margin.left + 40, currentY, { font: boldFont, size: 9 });
-  drawText('day of', margin.left + 60, currentY, { size: 9 });
-  drawText(`${monthName}`, margin.left + 95, currentY, { font: boldFont, size: 9 });
-  drawText(`, ${notaryDateObj.getFullYear()}`, margin.left + 160, currentY, { size: 9 });
-  drawText('personally appeared before me,', margin.left + 200, currentY, { size: 9 });
-  drawText(userName, margin.left + 380, currentY, { font: boldFont, size: 9 });
-
-  // Address line
-  currentY += 18; // Reduced spacing
-  drawText('doing business at', margin.left, currentY, { size: 9 });
-  drawText('4743 Merwin St, Houston, TX 77027', margin.left + 80, currentY, { font: boldFont, size: 9 });
-  
-  // Identity confirmation
-  currentY += 18; // Reduced spacing
-  drawText('personally known or sufficiently identified to me,', margin.left, currentY, { size: 9 });
-
-  // Certification line
-  currentY += 18; // Reduced spacing
-  drawText('who certifies that he is the individual who executed the foregoing instrument', margin.left, currentY, { size: 9 });
-  
-  // Acknowledgment line
-  currentY += 18; // Reduced spacing
-  drawText('and acknowledge it to be of free act and deed.', margin.left, currentY, { size: 9 });
-
-  // Draw notary signature with reduced size
-  if (notarySignatureImage) {
-    const signatureWidth = Math.min(90, notarySignatureImage.width); // Slightly smaller
-    const signatureHeight = notarySignatureImage.height * (signatureWidth / notarySignatureImage.width);
-    
-    page.drawImage(notarySignatureImage, {
-      x: width - margin.right - signatureWidth,
-      y: height - (notaryLineY + 55),
-      width: signatureWidth,
-      height: signatureHeight,
-    });
-  } else {
-    // Signature line if no image
-    drawLine(width - margin.right - 120, notaryLineY + 55, width - margin.right, notaryLineY + 55, 1);
-  }
-  
-  // Draw notary seal - adjust position for visibility
-  if (notarySealImage) {
-    const sealWidth = Math.min(75, notarySealImage.width); // Slightly smaller
-    const sealHeight = notarySealImage.height * (sealWidth / notarySealImage.width);
-    
-    page.drawImage(notarySealImage, {
-      x: margin.left + 200,
-      y: height - (notaryLineY + 45),
-      width: sealWidth,
-      height: sealHeight,
-    });
-  } else {
-    // Draw a rectangle for the notary seal if no image
-    drawRect?.(margin.left + 200, notaryLineY + 35, 75, 35, {
-      borderWidth: 1,
-      borderColor: [0, 0, 0]
-    });
-    
-    drawText('NOTARY SEAL', margin.left + 237, notaryLineY + 53, { 
-      font: italicFont, 
-      size: 9,
-      align: 'center',
-      maxWidth: 75
-    });
-  }
-
-  // Draw notary label
-  drawText('(Notary Public)', width - margin.right - 60, notaryLineY + 75, { 
-    font: italicFont, 
-    size: 9
+  page.drawText("Yours faithfully,", {
+    x: 50,
+    y: currentY,
+    size: 10,
+    font: fonts.regular
   });
+  
+  // Add more space between "Yours faithfully" and signature
+  currentY -= compactLineHeight * 3; // Increased from 1.5 to 3 to lower the signature more
+  
+  // Signature image with proper positioning
+  if (data.signatureImage) {
+    const signatureWidth = 150;
+    const signatureHeight = 50;
+    page.drawImage(data.signatureImage, {
+      x: 50,
+      y: currentY - signatureHeight + 20,
+      width: signatureWidth,
+      height: signatureHeight
+    });
+    currentY -= signatureHeight - 10;
+  }
+  
+  // Draw a line under the signature - extend it slightly to match sample
+  page.drawLine({
+    start: { x: 50, y: currentY },
+    end: { x: 230, y: currentY }, // Extended from 200 to 230
+    thickness: 1,
+    color: rgb(0, 0, 0)
+  });
+  currentY -= compactLineHeight;
+  
+  // Name with comma separator to match sample
+  page.drawText(data.signatoryName + ",", {
+    x: 50,
+    y: currentY,
+    size: 10,
+    font: fonts.regular
+  });
+  currentY -= compactLineHeight;
+  
+  // Title on its own line
+  page.drawText("Vicepresident Latin America", {
+    x: 50,
+    y: currentY,
+    size: 10,
+    font: fonts.regular
+  });
+  currentY -= compactLineHeight;
+  
+  // Company name in proper format (not all caps) to match sample
+  page.drawText("Texas Worldwide Oil Services LLC", {
+    x: 50,
+    y: currentY,
+    size: 10,
+    font: fonts.bold
+  });
+  currentY -= compactLineHeight;
+  
+  // Address
+  page.drawText("4743 Merwin St, Houston TX 77027", {
+    x: 50,
+    y: currentY,
+    size: 10,
+    font: fonts.regular
+  });
+  currentY -= compactLineHeight;
+  
+  // Contact information
+  page.drawText("USA Direct +1(713) 309-6637", {
+    x: 50,
+    y: currentY,
+    size: 10,
+    font: fonts.regular
+  });
+  
+  return currentY - lineHeight * 3; // Keep the original spacing to the footer
 }
 
-// Draw document footer
 function drawDocumentFooter(
   page: PDFPage,
-  { font }: { font: PDFFont },
-  { width, height, margin, contentWidth }: PageConfig,
-  { drawText, drawLine }: DrawFunctions
+  pdfDoc: PDFDocument,
+  fonts: {
+    regular: PDFFont;
+    bold: PDFFont;
+  },
+  yStart: number,
+  data: NotaryFooterData
 ) {
-  // Add a separator line before footer
-  drawLine(margin.left, height - margin.bottom - 50, width - margin.right, height - margin.bottom - 50, 1);
+  const { width, height } = page.getSize();
+  const lineHeight = 14;
   
-  // Footer - ensure it's clearly separated from the body
-  drawText('This Certificate of Origin is issued in accordance with international trade practises.', width / 2, height - margin.bottom - 40, {
-    size: 9,
-    align: 'center'
+  // Simplified footer to match the sample's cleaner layout
+  let currentY = yStart;
+  
+  // City, County, State on a single line with proper capitalization
+  page.drawText("CITY: Houston", {
+    x: 50,
+    y: currentY,
+    size: 10,
+    font: fonts.regular
   });
   
-  drawText('TEXAS WORLDWIDE OIL SERVICES LLC', width / 2, height - margin.bottom - 25, {
-    size: 8,
-    align: 'center'
+  page.drawText("COUNTY: Harris", {
+    x: 220,
+    y: currentY,
+    size: 10,
+    font: fonts.regular
   });
   
-  drawText('USA Direct +1 (713) 309-6637 / +1 (713) 409-1637', width / 2, height - margin.bottom - 15, {
-    size: 8,
-    align: 'center'
+  page.drawText("STATE: TX", {
+    x: 390,
+    y: currentY,
+    size: 10,
+    font: fonts.regular
   });
+  currentY += lineHeight * 1.5;
+  
+  // Clean date format similar to sample
+  page.drawText("On this", {
+    x: 50,
+    y: currentY,
+    size: 10,
+    font: fonts.regular
+  });
+  
+  // Format date to match sample (1st day of November, 2024)
+  const dateObj = new Date();
+  const day = dateObj.getDate();
+  const getOrdinalSuffix = (n: number): string => {
+    if (n > 3 && n < 21) return 'th';
+    switch (n % 10) {
+      case 1: return 'st';
+      case 2: return 'nd';
+      case 3: return 'rd';
+      default: return 'th';
+    }
+  };
+  const month = dateObj.toLocaleString('en-US', { month: 'long' });
+  const year = dateObj.getFullYear();
+  
+  page.drawText(`${day}${getOrdinalSuffix(day)} day of ${month}, ${year}`, {
+    x: 90,
+    y: currentY,
+    size: 10,
+    font: fonts.regular
+  });
+  
+  page.drawText("personally appeared before me,", {
+    x: 340,
+    y: currentY,
+    size: 10,
+    font: fonts.regular
+  });
+  currentY += lineHeight;
+  
+  // Simplified certification text into two clean lines instead of multiple segments
+  page.drawText("who executed the foregoing instrument and", {
+    x: 50,
+    y: currentY,
+    size: 10,
+    font: fonts.regular
+  });
+  currentY += lineHeight;
+  
+  page.drawText("acknowledge it to be of free act and deed.", {
+    x: 50,
+    y: currentY,
+    size: 10,
+    font: fonts.regular
+  });
+  currentY += lineHeight * 2;
+  
+  // Draw notary seal at bottom left - slightly larger to match sample
+  if (data.notarySealImage) {
+    const sealWidth = 130; // Increased from 120
+    const sealHeight = 90; // Increased from 80
+    page.drawImage(data.notarySealImage, {
+      x: 50,
+      y: currentY - sealHeight + 20,
+      width: sealWidth,
+      height: sealHeight
+    });
+  }
+  
+  // Draw notary signature at bottom right - slightly larger to match sample
+  if (data.notarySignatureImage) {
+    const signatureWidth = 160; // Increased from 150
+    const signatureHeight = 65; // Increased from 60
+    page.drawImage(data.notarySignatureImage, {
+      x: width - signatureWidth - 50,
+      y: currentY - signatureHeight + 20,
+      width: signatureWidth,
+      height: signatureHeight
+    });
+    
+    // Add "(Notary Public)" text under signature to match sample
+    page.drawText("(Notary Public)", {
+      x: width - 120,
+      y: currentY - signatureHeight - 10,
+      size: 10,
+      font: fonts.regular
+    });
+  }
+  
+  return currentY - 80;
+}
+
+async function loadAssetImage(bucket: any, filename: string): Promise<Buffer | null> {
+  try {
+    // Find the file by filename
+    const file = await bucket.find({ filename }).next();
+    if (!file) {
+      console.error(`Asset file ${filename} not found`);
+      return null;
+    }
+
+    // Download the file
+    const chunks: Buffer[] = [];
+    const downloadStream = bucket.openDownloadStream(file._id);
+    
+    for await (const chunk of downloadStream) {
+      chunks.push(Buffer.from(chunk));
+    }
+    
+    return Buffer.concat(chunks);
+  } catch (error) {
+    console.error(`Error loading asset ${filename}:`, error);
+    return null;
+  }
 }
 
 export async function POST(
@@ -385,6 +685,7 @@ export async function POST(
     const body = await request.json()
     const mode = body?.mode || 'new'
     const customDate = body?.customDate
+    const showSection = body?.showSection // 'header', 'body', 'footer', or null for full document
     
     await connectDB()
 
@@ -425,18 +726,32 @@ export async function POST(
 
     // Create a new PDF document
     const pdfDoc = await PDFDocument.create()
-    const page = pdfDoc.addPage([612, 792]) // US Letter size
-    
-    // Set page margins
-    const margin = { top: 36, right: 36, bottom: 90, left: 36 }
-    const width = page.getWidth()
-    const height = page.getHeight()
+
+    // US Letter size: 8.5 x 11 inches = 612 x 792 points
+    const page = pdfDoc.addPage([612, 792])
+
+    // Set page margins (in points)
+    const margin = { 
+      top: 50,    // Increased from 36 for better spacing
+      right: 50,  // Increased from 36 for better spacing
+      bottom: 50, // Adjusted from 90 to be consistent
+      left: 50    // Increased from 36 for better spacing
+    }
+
+    // Calculate usable dimensions
+    const width = page.getWidth()        // 612 points
+    const height = page.getHeight()      // 792 points
     const contentWidth = width - margin.left - margin.right
+    const contentHeight = height - margin.top - margin.bottom
 
     // Load fonts from StandardFonts
-    const font = await pdfDoc.embedFont(StandardFonts.TimesRoman)
-    const boldFont = await pdfDoc.embedFont(StandardFonts.TimesRomanBold)
-    const italicFont = await pdfDoc.embedFont(StandardFonts.TimesRomanItalic)
+    const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica)
+    const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
+    
+    const fonts = {
+      regular: helveticaFont,
+      bold: helveticaBold
+    }
 
     // Date handling logic - correctly parse from BOL data
     let businessDateObj = new Date()
@@ -484,36 +799,26 @@ export async function POST(
     }
 
     // Properly format the date for display
-    const getOrdinalSuffix = (day: number): string => {
-      if (day > 3 && day < 21) return 'th';
-      switch (day % 10) {
-        case 1: return 'st';
-        case 2: return 'nd';
-        case 3: return 'rd';
-        default: return 'th';
-      }
-    };
-
     const formatDateFormal = (date: Date): string => {
-      const day = date.getDate();
-      const month = date.toLocaleString('en-US', { month: 'long' });
-      const year = date.getFullYear();
-      return `${month} ${day}, ${year}`;
+      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+      const dayOfWeek = days[date.getDay()]
+      const day = date.getDate()
+      const month = date.toLocaleString('default', { month: 'long' })
+      const year = date.getFullYear()
+      
+      const getOrdinalSuffix = (n: number): string => {
+        if (n > 3 && n < 21) return 'th'
+        switch (n % 10) {
+          case 1: return 'st'
+          case 2: return 'nd'
+          case 3: return 'rd'
+          default: return 'th'
+        }
+      }
+
+      return `${dayOfWeek}, ${day}${getOrdinalSuffix(day)} day of ${month}, ${year}`
     };
 
-    const getNextBusinessDay = (date: Date): Date => {
-      const newDate = new Date(date);
-      newDate.setDate(newDate.getDate() + 1);
-      
-      // Skip weekends
-      const day = newDate.getDay();
-      if (day === 0) newDate.setDate(newDate.getDate() + 1); // Sunday, move to Monday
-      if (day === 6) newDate.setDate(newDate.getDate() + 2); // Saturday, move to Monday
-      
-      return newDate;
-    };
-
-    // Format dates for various parts of the document
     const formattedBusinessDay = formatDateFormal(businessDateObj);
     const businessDayName = businessDateObj.toLocaleString('en-US', { weekday: 'long' });
     const businessMonth = businessDateObj.toLocaleString('en-US', { month: 'long' });
@@ -521,43 +826,44 @@ export async function POST(
     const businessYear = businessDateObj.getFullYear();
 
     // Load logo
-    let logoImage;
+    let logoPath;
     try {
-      const logo = await Asset.findOne({ type: 'letterhead', name: /logo/i });
-      
-      if (logo && mongoose.connection.db) {
-        const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-          bucketName: 'assets'
-        });
-        
-        const fileId = typeof logo.fileId === 'string' 
-          ? new mongoose.Types.ObjectId(logo.fileId)
-          : logo.fileId;
-          
-        const downloadStream = bucket.openDownloadStream(fileId);
-        
-        // Convert stream to buffer
-        const chunks: Buffer[] = [];
-        for await (const chunk of downloadStream) {
-          chunks.push(Buffer.from(chunk));
-        }
-        const buffer = Buffer.concat(chunks);
-        
-        // Embed logo image
-        if (logo.contentType.startsWith('image/')) {
-          if (logo.contentType === 'image/png') {
-            logoImage = await pdfDoc.embedPng(buffer);
-          } else if (logo.contentType === 'image/jpeg' || logo.contentType === 'image/jpg') {
-            logoImage = await pdfDoc.embedJpg(buffer);
-          }
-        }
+      // Try to load the logo from the public directory
+      logoPath = path.join(process.cwd(), 'public', 'txwos-logo.png');
+      if (!fs.existsSync(logoPath)) {
+        console.log('Logo file not found at path:', logoPath);
+        logoPath = null;
       }
     } catch (error) {
-      console.error('Error embedding logo:', error);
+      console.error('Error checking for logo file:', error);
+      logoPath = null;
+    }
+    
+    let logoImage;
+    if (logoPath) {
+      try {
+        const logoBytes = fs.readFileSync(logoPath);
+        logoImage = await pdfDoc.embedPng(logoBytes);
+      } catch (error) {
+        console.error('Error embedding logo:', error);
+        logoImage = undefined;
+      }
+    }
+
+    // Create GridFS bucket for assets
+    const assetsBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db!, {
+      bucketName: 'assets'
+    });
+
+    // Load notary signature from assets
+    const notarySignatureBuffer = await loadAssetImage(assetsBucket, 'Notary_signature.jpg');
+    let notarySignatureImage;
+    if (notarySignatureBuffer) {
+      notarySignatureImage = await pdfDoc.embedJpg(notarySignatureBuffer);
     }
 
     // Load signature and notary assets
-    let signatureImage, notarySignatureImage, notarySealImage;
+    let signatureImage, notarySealImage;
     try {
       // Get the first name from the user's full name to search for their signature
       const firstName = session.user?.name?.split(' ')[0] || '';
@@ -571,7 +877,6 @@ export async function POST(
         ? signatures[Math.floor(Math.random() * signatures.length)] 
         : await Asset.findOne({ type: 'signature' });
       
-      const notarySignature = await Asset.findOne({ type: 'signature', name: /notary/i });
       const notarySeal = await Asset.findOne({ type: 'notary_seal' });
       
       if (mongoose.connection.db) {
@@ -600,31 +905,6 @@ export async function POST(
               signatureImage = await pdfDoc.embedPng(buffer);
             } else if (signature.contentType === 'image/jpeg' || signature.contentType === 'image/jpg') {
               signatureImage = await pdfDoc.embedJpg(buffer);
-            }
-          }
-        }
-        
-        // Process notary signature if available
-        if (notarySignature) {
-          const fileId = typeof notarySignature.fileId === 'string' 
-            ? new mongoose.Types.ObjectId(notarySignature.fileId)
-            : notarySignature.fileId;
-            
-          const downloadStream = bucket.openDownloadStream(fileId);
-          
-          // Convert stream to buffer
-          const chunks: Buffer[] = [];
-          for await (const chunk of downloadStream) {
-            chunks.push(Buffer.from(chunk));
-          }
-          const buffer = Buffer.concat(chunks);
-          
-          // Embed notary signature image
-          if (notarySignature.contentType.startsWith('image/')) {
-            if (notarySignature.contentType === 'image/png') {
-              notarySignatureImage = await pdfDoc.embedPng(buffer);
-            } else if (notarySignature.contentType === 'image/jpeg' || notarySignature.contentType === 'image/jpg') {
-              notarySignatureImage = await pdfDoc.embedJpg(buffer);
             }
           }
         }
@@ -667,7 +947,7 @@ export async function POST(
       maxWidth?: number
     } = {}) => {
       const { 
-        font: textFont = font, 
+        font: textFont = fonts.regular, 
         size = 10, 
         color = [0, 0, 0], 
         align = 'left',
@@ -752,47 +1032,146 @@ export async function POST(
     // Get authenticated user's name
     const userName = session.user?.name || 'Authorized Representative';
 
-    // Draw header
-    drawDocumentHeader(
-      page,
-      { font, boldFont },
-      { width, height, margin, contentWidth },
-      { formattedBusinessDay, logoImage },
-      { drawText, drawLine }
-    );
+    let y = 0;
+    
+    // Check if we're rendering a specific section or the full document
+    if (showSection) {
+      // We're only showing a specific section
+      switch (showSection) {
+        case 'header':
+          // Draw only the header section
+          drawDocumentHeader(
+            page,
+            pdfDoc,
+            fonts,
+            logoImage,
+            formattedBusinessDay,
+            {
+              name: client.name,
+              address: client.address ? client.address.split('\n') : [],
+              taxId: client.rif || ''
+            }
+          );
+          break;
+          
+        case 'body':
+          // Draw only the body section
+          drawDocumentBody(
+            page,
+            pdfDoc,
+            fonts,
+            height - margin.top, // Start at the top of the page
+            {
+              buyerName: client.name,
+              buyerAddress: client.address ? client.address.split('\n') : [],
+              buyerTaxId: client.rif || '',
+              bolNumber: bolDocument.bolData?.bolNumber || '',
+              vesselName: bolDocument.bolData?.vessel || '',
+              voyageNumber: bolDocument.bolData?.voyage || '',
+              containers,
+              productName: uniqueProducts.size > 0 ? Array.from(uniqueProducts)[0] : '',
+              portOfLoading: bolDocument.bolData?.portOfLoading || '',
+              portOfDischarge: bolDocument.bolData?.portOfDischarge || ''
+            }
+          );
+          break;
+          
+        case 'footer':
+          // Draw only the footer section
+          drawSignatureSection(
+            page,
+            pdfDoc,
+            fonts,
+            height - margin.top, // Start at the top of the page
+            {
+              signatureImage,
+              signatoryName: userName,
+              signatoryTitle: 'Vicepresident Latin America',
+              signatoryCompany: 'Texas Worldwide Oil Services LLC',
+              signatoryAddress: '4743 Merwin St, Houston TX 77027',
+              signatoryContact: 'USA Direct +1(713) 309-6637'
+            }
+          );
+          break;
+      }
+    } else {
+      // Draw the complete document with all sections
+      
+      // Draw header
+      const headerY = drawDocumentHeader(
+        page,
+        pdfDoc,
+        fonts,
+        logoImage,
+        formattedBusinessDay,
+        {
+          name: client.name,
+          address: client.address ? client.address.split('\n') : [],
+          taxId: client.rif || ''
+        }
+      );
+      
+      // Draw body
+      const bodyY = drawDocumentBody(
+        page,
+        pdfDoc,
+        fonts,
+        headerY,
+        {
+          buyerName: client.name,
+          buyerAddress: client.address ? client.address.split('\n') : [],
+          buyerTaxId: client.rif || '',
+          bolNumber: bolDocument.bolData?.bolNumber || '',
+          vesselName: bolDocument.bolData?.vessel || '',
+          voyageNumber: bolDocument.bolData?.voyage || '',
+          containers,
+          productName: uniqueProducts.size > 0 ? Array.from(uniqueProducts)[0] : '',
+          portOfLoading: bolDocument.bolData?.portOfLoading || '',
+          portOfDischarge: bolDocument.bolData?.portOfDischarge || ''
+        }
+      );
+      
+      // Draw signature section
+      const signatureY = drawSignatureSection(
+        page,
+        pdfDoc,
+        fonts,
+        bodyY,
+        {
+          signatureImage,
+          signatoryName: userName,
+          signatoryTitle: 'Vicepresident Latin America',
+          signatoryCompany: 'Texas Worldwide Oil Services LLC',
+          signatoryAddress: '4743 Merwin St, Houston TX 77027',
+          signatoryContact: 'USA Direct +1(713) 309-6637'
+        }
+      );
 
-    // Draw body content
-    const currentY = drawDocumentBody(
-      page,
-      { font, boldFont, italicFont },
-      { width, height, margin, contentWidth },
-      { client, bolDocument, containers, uniqueProducts },
-      { drawText, drawLine, drawRect }
-    );
-
-    // Draw signature and notary
-    drawSignatureAndNotary(
-      page,
-      { font, boldFont, italicFont },
-      { width, height, margin, contentWidth },
-      { 
-        currentY, 
-        signatureImage, 
-        notarySignatureImage, 
-        notarySealImage, 
-        businessDateObj,
-        userName
-      },
-      { drawText, drawLine, drawRect, getOrdinalSuffix }
-    );
-
-    // Draw footer
-    drawDocumentFooter(
-      page,
-      { font },
-      { width, height, margin, contentWidth },
-      { drawText, drawLine }
-    );
+      // Draw footer with notary information
+      const footerY = drawDocumentFooter(
+        page,
+        pdfDoc,
+        fonts,
+        signatureY,
+        {
+          notarySignatureImage,
+          notarySealImage,
+          notaryDate: {
+            city: 'Houston',
+            county: 'Harris',
+            state: 'Texas',
+            day: formattedBusinessDay,
+            month: businessDateObj.toLocaleString('default', { month: 'long' }),
+            year: businessDateObj.getFullYear().toString()
+          },
+          notaryInfo: {
+            name: 'TOMAS ALVAREZ',
+            id: '133713739',
+            expirationDate: '03/14/2027'
+          }
+        }
+      );
+    }
 
     // Save the PDF
     const pdfBytes = await pdfDoc.save()

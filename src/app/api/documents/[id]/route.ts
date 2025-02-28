@@ -27,20 +27,36 @@ export async function DELETE(
       return NextResponse.json({ error: 'Document not found' }, { status: 404 })
     }
 
-    // Get GridFS bucket for file deletions
-    const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db!, {
+    // Get GridFS buckets for file deletions
+    const documentsBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db!, {
       bucketName: 'documents'
+    })
+    
+    const fsBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db!, {
+      bucketName: 'fs'
     })
 
     // Function to delete a document and its file
     const deleteDocumentAndFile = async (docId: mongoose.Types.ObjectId, fileId: mongoose.Types.ObjectId) => {
       try {
-        // Delete file from GridFS
-        await bucket.delete(fileId)
-        console.log(`Deleted file ${fileId} from GridFS`)
+        // Try to delete from documents bucket first
+        try {
+          await documentsBucket.delete(fileId)
+          console.log(`Deleted file ${fileId} from 'documents' bucket`)
+        } catch (error) {
+          console.log(`File ${fileId} not found in 'documents' bucket, trying 'fs' bucket`)
+          
+          // If that fails, try the fs bucket
+          try {
+            await fsBucket.delete(fileId)
+            console.log(`Deleted file ${fileId} from 'fs' bucket`)
+          } catch (fsError) {
+            console.error(`Error deleting file ${fileId} from both buckets:`, fsError)
+            // Continue with document deletion even if file deletion fails
+          }
+        }
       } catch (error) {
-        console.error(`Error deleting file ${fileId} from GridFS:`, error)
-        // Continue with document deletion even if file deletion fails
+        console.error(`Error during file deletion process for ${fileId}:`, error)
       }
 
       // Delete document from database

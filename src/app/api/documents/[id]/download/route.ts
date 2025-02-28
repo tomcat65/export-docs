@@ -36,15 +36,18 @@ export async function GET(
     }
 
     const bucket = new mongoose.mongo.GridFSBucket(db, {
-      bucketName: 'documents'
+      bucketName: 'fs'
     })
 
     try {
       // Get the file metadata
+      console.log(`Attempting to download document ID: ${id}, fileId: ${document.fileId}, from bucket: 'fs'`);
       const file = await bucket.find({ _id: new mongoose.Types.ObjectId(document.fileId) }).next()
       if (!file) {
-        return new NextResponse('File not found', { status: 404 })
+        console.error(`File with ID ${document.fileId} not found in GridFS bucket 'fs'`);
+        return new NextResponse('File not found in GridFS', { status: 404 })
       }
+      console.log(`Found file in GridFS: ${file.filename}, size: ${file.length} bytes`);
 
       // Create a stream to read the file
       const downloadStream = bucket.openDownloadStream(new mongoose.Types.ObjectId(document.fileId))

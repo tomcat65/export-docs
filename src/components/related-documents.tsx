@@ -15,6 +15,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Loader2, FileText, FilePlus } from 'lucide-react'
+import { CooViewer } from './coo-viewer'
 
 interface Document {
   _id: string
@@ -70,13 +71,14 @@ export function RelatedDocuments({
 
       if (type === 'PL') {
         setGeneratingPL(true)
-      } else {
+      } else if (type === 'COO') {
         setGeneratingCOO(true)
       }
 
       console.log(`Generating ${type} document for BOL ID: ${bolId} with mode: ${mode}`);
       
-      const url = `/api/documents/${bolId}/generate/${type.toLowerCase()}`;
+      const endpoint = type.toLowerCase();
+      const url = `/api/documents/${bolId}/generate/${endpoint}`;
       console.log(`Making request to: ${url}`);
       
       const response = await fetch(url, {
@@ -99,9 +101,13 @@ export function RelatedDocuments({
       const responseData = await response.json();
       console.log(`Response data:`, responseData);
       
+      const docType = type === 'PL' 
+        ? 'Packing List' 
+        : 'Certificate of Origin';
+      
       toast({
         title: 'Success',
-        description: `${type === 'PL' ? 'Packing List' : 'Certificate of Origin'} generated successfully`,
+        description: `${docType} generated successfully`,
       });
       
       // Set a flag in sessionStorage to preserve the expanded state
@@ -127,7 +133,7 @@ export function RelatedDocuments({
     } finally {
       if (type === 'PL') {
         setGeneratingPL(false);
-      } else {
+      } else if (type === 'COO') {
         setGeneratingCOO(false);
       }
       setConfirmDialog({ ...confirmDialog, open: false });
@@ -145,7 +151,10 @@ export function RelatedDocuments({
       return;
     }
     
-    const exists = type === 'PL' ? existingPL : existingCOO
+    const exists = type === 'PL' 
+      ? existingPL 
+      : existingCOO;
+        
     if (exists) {
       setConfirmDialog({
         open: true,
@@ -158,11 +167,52 @@ export function RelatedDocuments({
   }
 
   const renderDocumentButton = (type: 'PL' | 'COO') => {
-    const exists = type === 'PL' ? existingPL : existingCOO
-    const isGenerating = type === 'PL' ? generatingPL : generatingCOO
-    const label = type === 'PL' ? 'Packing List' : 'Certificate of Origin'
+    const exists = type === 'PL' 
+      ? existingPL 
+      : existingCOO;
+        
+    const isGenerating = type === 'PL' 
+      ? generatingPL 
+      : generatingCOO;
+        
+    const label = type === 'PL' 
+      ? 'Packing List' 
+      : 'Certificate of Origin';
 
     if (exists) {
+      // For COO documents, use the CooViewer component
+      if (type === 'COO') {
+        return (
+          <div className="flex flex-col space-y-2">
+            <div className="flex space-x-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.open(`/api/documents/download/${exists._id}`, '_blank')}
+              >
+                <FileText className="mr-2 h-4 w-4" />
+                View {label}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => openConfirmDialog(type)}
+                disabled={isGenerating || !bolId}
+              >
+                {isGenerating ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <FilePlus className="mr-2 h-4 w-4" />
+                )}
+                Regenerate
+              </Button>
+            </div>
+            <CooViewer documentId={exists._id} />
+          </div>
+        );
+      }
+      
+      // For other document types
       return (
         <div className="flex space-x-2">
           <Button
@@ -187,7 +237,7 @@ export function RelatedDocuments({
             Regenerate
           </Button>
         </div>
-      )
+      );
     }
 
     return (
@@ -231,7 +281,9 @@ export function RelatedDocuments({
           <AlertDialogHeader>
             <AlertDialogTitle>Regenerate Document</AlertDialogTitle>
             <AlertDialogDescription>
-              A {confirmDialog.type === 'PL' ? 'Packing List' : 'Certificate of Origin'} for this BOL already exists. 
+              A {confirmDialog.type === 'PL' 
+                 ? 'Packing List' 
+                 : 'Certificate of Origin'} for this BOL already exists. 
               Would you like to overwrite the existing document or create a new version?
             </AlertDialogDescription>
           </AlertDialogHeader>

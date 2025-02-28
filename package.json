@@ -2,6 +2,7 @@
   "name": "project",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
@@ -9,7 +10,9 @@
     "lint": "next lint",
     "create-admin": "tsx scripts/create-admin.ts",
     "update-auth": "tsx scripts/update-auth-rules.ts",
-    "cleanup-admins": "tsx scripts/cleanup-admins.ts"
+    "cleanup-admins": "tsx scripts/cleanup-admins.ts",
+    "cleanup-coo": "node scripts/cleanup-coo.js",
+    "cleanup-gridfs": "tsx scripts/cleanup-gridfs.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.37.0",

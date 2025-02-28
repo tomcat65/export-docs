@@ -45,7 +45,7 @@ export async function GET(
     }
     
     const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-      bucketName: 'documents'
+      bucketName: 'fs'
     })
 
     // Convert fileId to ObjectId if it's a string
@@ -53,14 +53,19 @@ export async function GET(
       ? new mongoose.Types.ObjectId(document.fileId)
       : document.fileId;
 
+    console.log(`Attempting to download document ID: ${id}, fileId: ${fileId.toString()}, from bucket: 'fs'`);
+      
     // Check if file exists
-    const file = await mongoose.connection.db.collection('documents.files').findOne({ _id: fileId })
+    const file = await mongoose.connection.db.collection('fs.files').findOne({ _id: fileId })
     if (!file) {
+      console.error(`File with ID ${fileId.toString()} not found in GridFS bucket 'fs'`);
       return NextResponse.json(
         { error: 'File not found in GridFS' },
         { status: 404 }
       )
     }
+    
+    console.log(`Found file in GridFS: ${file.filename}, size: ${file.length} bytes`);
 
     // Get file stream
     const downloadStream = bucket.openDownloadStream(fileId)
