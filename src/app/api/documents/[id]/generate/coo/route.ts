@@ -9,6 +9,16 @@ import mongoose from 'mongoose'
 import fs from 'fs'
 import path from 'path'
 import { Types } from 'mongoose'
+import { GridFSBucket } from 'mongodb'
+
+// Helper function to extract product name from description
+function extractProductName(description: string): string {
+  if (!description) return '';
+  
+  // Remove packaging info patterns like "1 FLEXI TANK" or "10 IBC"
+  return description.replace(/^\d+\s+(?:FLEXI\s+TANK|FLEXITANK|FLEXI-TANK|IBC|DRUM|DRUMS|CONTAINER|BULK|TOTE)s?\s+/i, '')
+    .trim();
+}
 
 interface GenerateRequest {
   mode?: 'overwrite' | 'new'
@@ -342,11 +352,23 @@ function drawDocumentBody(
   });
   
   // Format product name to match sample (Base Oil Group II, ARAMCO PRIMA 600N)
-  const formattedProductName = data.productName
-    .replace(/flexi tank/i, '')
-    .replace(/base oil group ii/i, 'Base Oil Group II,')
-    .replace(/600n/i, '600N')
-    .toUpperCase();
+  // Add safety checks to handle empty product names
+  const productNameTrimmed = (data.productName || '').trim();
+  console.log("Raw product name before formatting:", productNameTrimmed);
+  
+  // Check if the product name still contains packaging info and remove it
+  const cleanedProductName = extractProductName(productNameTrimmed);
+  console.log("Product name after removing packaging:", cleanedProductName);
+  
+  const formattedProductName = cleanedProductName
+    ? cleanedProductName
+        .replace(/base oil group ii/i, 'Base Oil Group II,')
+        .replace(/600n/i, '600N')
+        .replace(/(\d+)n/i, '$1N') // Generic replacement for any number followed by 'N'
+        .toUpperCase()
+    : "[NO PRODUCT NAME FOUND]"; // Default text if no product name is available
+  
+  console.log("Formatted product name:", formattedProductName);
   
   page.drawText(formattedProductName, {
     x: margin + 130,
@@ -602,13 +624,7 @@ function drawDocumentFooter(
       height: signatureHeight
     });
     
-    // // Add "(Notary Public)" text below the signature
-    // page.drawText("(Notary Public)", {
-    //   x: width - 125,
-    //   y: notaryY - signatureHeight - 15,
-    //   size: 10,
-    //   font: fonts.regular
-    // });
+
   }
   
   // Position notary text in the middle, between seal and signature
@@ -681,7 +697,7 @@ function drawDocumentFooter(
     font: fonts.regular
   });
 
-  page.drawText("personally known or suficiently identified to me,", {
+  page.drawText("personally known or sufficiently identified to me,", {
     x: 320,
     y: 83,
     size: 10,
@@ -1088,24 +1104,49 @@ export async function POST(
     const containers: Array<{containerNumber: string, sealNumber: string}> = [];
     
     if (bolDocument.items && bolDocument.items.length > 0) {
+      console.log("BOL Document items dump:", JSON.stringify(bolDocument.items, null, 2));
+      
       bolDocument.items.forEach((item: any) => {
         containers.push({
           containerNumber: item.containerNumber,
           sealNumber: item.seal
         });
       });
+    } else {
+      console.log("No items found in bolDocument or empty array");
     }
 
     // Extract unique product descriptions
     const uniqueProducts = new Set<string>();
+    const productDebugInfo: any[] = [];
     
     if (bolDocument.items && bolDocument.items.length > 0) {
-      bolDocument.items.forEach((item: any) => {
-        if (item.description) {
-          uniqueProducts.add(item.description);
+      bolDocument.items.forEach((item: any, index: number) => {
+        // Debug information
+        productDebugInfo.push({
+          index,
+          hasProduct: !!item.product,
+          product: item.product,
+          hasDescription: !!item.description,
+          description: item.description,
+          packaging: item.packaging,
+          packagingQuantity: item.packagingQuantity
+        });
+        
+        // First try to use the dedicated product field
+        if (item.product && typeof item.product === 'string' && item.product.trim() !== '') {
+          uniqueProducts.add(item.product.trim());
+        } 
+        // If product field doesn't exist or is empty, extract product from description
+        else if (item.description && typeof item.description === 'string' && item.description.trim() !== '') {
+          const extractedProduct = extractProductName(item.description);
+          uniqueProducts.add(extractedProduct);
         }
       });
     }
+    
+    console.log("Product extraction debug info:", JSON.stringify(productDebugInfo, null, 2));
+    console.log("Extracted unique products:", JSON.stringify(Array.from(uniqueProducts), null, 2));
     
     // Get authenticated user's name
     
@@ -1152,6 +1193,9 @@ export async function POST(
               portOfDischarge: bolDocument.bolData?.portOfDischarge || ''
             }
           );
+          
+          // Log the product name being used
+          console.log("Product name used for section 'body':", uniqueProducts.size > 0 ? Array.from(uniqueProducts)[0] : '[EMPTY]');
           break;
           
         case 'footer':
@@ -1208,6 +1252,10 @@ export async function POST(
           portOfDischarge: bolDocument.bolData?.portOfDischarge || ''
         }
       );
+      
+      // Log the product name being used in the complete document
+      const selectedProductName = uniqueProducts.size > 0 ? Array.from(uniqueProducts)[0] : '';
+      console.log("Product name used in complete document:", selectedProductName || '[EMPTY]');
       
       // Draw signature section
       const signatureY = drawSignatureSection(

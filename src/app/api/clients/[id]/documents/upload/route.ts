@@ -49,9 +49,9 @@ async function cleanupOldFiles(bucket: any, fileName: string, bolNumber?: string
   }
 }
 
-// Utility function to clean product descriptions
-function cleanProductDescription(description: string): string {
-  if (!description) return '';
+// Utility function to extract product and packaging information from description
+function extractProductAndPackaging(description: string): { product: string, packaging: string } {
+  if (!description) return { product: '', packaging: '' };
   
   // Remove common phrases that precede the actual product description
   const phrasesToRemove = [
@@ -72,7 +72,52 @@ function cleanProductDescription(description: string): string {
   });
   
   // Trim any extra whitespace
-  return cleanedDescription.trim();
+  cleanedDescription = cleanedDescription.trim();
+  
+  // Common packaging terms to look for
+  const packagingTerms = [
+    'flexitank', 'flexi tank', 'flexi-tank',
+    'iso tank', 'isotank', 'iso-tank',
+    'drum', 'drums', 'barrel', 'barrels',
+    'container', 'bulk', 'ibc', 'tote'
+  ];
+  
+  // Default values
+  let product = cleanedDescription;
+  let packaging = '';
+  
+  // Check for packaging terms in the description
+  for (const term of packagingTerms) {
+    const regex = new RegExp(`\\b${term}\\b`, 'i');
+    if (regex.test(cleanedDescription)) {
+      packaging = term.charAt(0).toUpperCase() + term.slice(1).toLowerCase();
+      
+      // Remove the packaging term from the product description
+      product = cleanedDescription.replace(regex, '').trim();
+      
+      // Remove "in" or "in a" before the packaging term if present
+      product = product.replace(/\s+in\s+a\s*$/i, '').replace(/\s+in\s*$/i, '').trim();
+      break;
+    }
+  }
+  
+  // If no packaging term was found, check for common patterns
+  if (!packaging) {
+    // Check for "in [packaging]" pattern
+    const inPackagingMatch = cleanedDescription.match(/\s+in\s+(\w+)$/i);
+    if (inPackagingMatch) {
+      packaging = inPackagingMatch[1];
+      product = cleanedDescription.replace(/\s+in\s+\w+$/i, '').trim();
+    }
+  }
+  
+  return { product, packaging };
+}
+
+// For backward compatibility
+function cleanProductDescription(description: string): string {
+  const { product } = extractProductAndPackaging(description);
+  return product;
 }
 
 export async function POST(
@@ -172,16 +217,21 @@ export async function POST(
         fileName: file.name,
         fileId: uploadStream.id,
         type: 'BOL' as const,
-        items: processedData.containers.map((container, index) => ({
-          itemNumber: index + 1,
-          containerNumber: container.containerNumber,
-          seal: container.sealNumber || '',
-          description: cleanProductDescription(container.product.description),
-          quantity: {
-            litros: container.quantity.volume.liters.toFixed(2),
-            kg: container.quantity.weight.kg.toFixed(3)
-          }
-        })),
+        items: processedData.containers.map((container, index) => {
+          const { product, packaging } = extractProductAndPackaging(container.product.description);
+          return {
+            itemNumber: index + 1,
+            containerNumber: container.containerNumber,
+            seal: container.sealNumber || '',
+            description: container.product.description, // Keep original description
+            product, // Store extracted product
+            packaging, // Store extracted packaging
+            quantity: {
+              litros: container.quantity.volume.liters.toFixed(2),
+              kg: container.quantity.weight.kg.toFixed(3)
+            }
+          };
+        }),
         bolData: {
           bolNumber: processedData.shipmentDetails.bolNumber,
           bookingNumber: processedData.shipmentDetails.bookingNumber || '',

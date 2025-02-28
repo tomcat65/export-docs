@@ -45,6 +45,9 @@ interface IDocument {
     containerNumber: string   // e.g. "MRKU8922059"
     seal: string             // e.g. "26787-26788"
     description: string      // e.g. "Base Oil Group II 600N"
+    product: string          // e.g. "Base Oil Group II 600N"
+    packaging: string        // e.g. "Flexitank"
+    packagingQuantity: number // e.g. 1 for a flexitank, or 10 for 10 IBCs
     quantity: {
       litros: string         // e.g. "23,680"
       kg: string            // e.g. "20,729.17"
@@ -132,6 +135,9 @@ const documentSchema = new mongoose.Schema<IDocument>({
     containerNumber: String,
     seal: String,
     description: String,
+    product: String,
+    packaging: String,
+    packagingQuantity: Number,
     quantity: {
       litros: String,
       kg: String
