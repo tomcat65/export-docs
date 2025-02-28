@@ -578,12 +578,12 @@ function drawDocumentFooter(
   
   // Draw notary seal on the left side
   if (data.notarySealImage) {
-    const sealWidth = 100;
-    const sealHeight = 60;
+    const sealWidth = 96;
+    const sealHeight = 46;
     
     page.drawImage(data.notarySealImage, {
-      x: 55,
-      y: notaryY - sealHeight,
+      x: 350,
+      y: 20,
       width: sealWidth,
       height: sealHeight
     });
@@ -596,8 +596,8 @@ function drawDocumentFooter(
     
     // Position signature at the right side
     page.drawImage(data.notarySignatureImage, {
-      x: width - signatureWidth - 55,
-      y: notaryY - signatureHeight,
+      x: 450,
+      y: 35,
       width: signatureWidth,
       height: signatureHeight
     });
@@ -617,17 +617,12 @@ function drawDocumentFooter(
   
   // Draw notary text on the left side of the signature
   // Add a line with the authenticated user's name right before the "personally appeared" text
-  page.drawText(userName, {
-    x: centerX, 
-    y: textY + lineHeight,
-    size: 10,
-    font: fonts.regular
-  });
+  
 
   // Notary text to be positioned in the middle section  
   page.drawText("On this", {
-    x: centerX,
-    y: textY,
+    x: 53,
+    y: 95,
     size: 10,
     font: fonts.regular
   });
@@ -647,39 +642,69 @@ function drawDocumentFooter(
   const month = dateObj.toLocaleString('en-US', { month: 'long' });
   const year = dateObj.getFullYear();
   
-  page.drawText(`${day}${getOrdinalSuffix(day)} day of ${month}, ${year},`, {
-    x: centerX + 42,
-    y: textY,
-    size: 10,
-    font: fonts.regular
-  });
-  
-  // Second line of text (personally appeared before me)
-  page.drawText(userName, {
-    x: centerX,
-    y: textY - lineHeight * 0.5,
+  page.drawText(`${day}${getOrdinalSuffix(day)}    day of    ${month}, ${year},`, {
+    x: 100,
+    y: 95,
     size: 10,
     font: fonts.regular
   });
   
   page.drawText("personally appeared before me,", {
-    x: centerX + 250,
-    y: textY,
+    x: 290,
+    y: 95,
+    size: 10,
+    font: fonts.regular
+  });
+  // Second line of text (personally appeared before me)
+  page.drawText(userName, {
+    x: 445,
+    y: 95,
+    size: 10,
+    font: fonts.regular
+  });
+
+  
+  
+  page.drawText("doing business at,", {
+    x: 53,
+    y: 83,
     size: 10,
     font: fonts.regular
   });
   
+ 
+
+  page.drawText("4743 Merwin St, Houston TX 77027", {
+    x: 140,
+    y: 83,
+    size: 10,
+    font: fonts.regular
+  });
+
+  page.drawText("personally known or suficiently identified to me,", {
+    x: 320,
+    y: 83,
+    size: 10,
+    font: fonts.regular
+  });
+
+  page.drawText("who certifies that     he      is", {
+    x: 53,
+    y: 71,
+    size: 10,
+    font: fonts.regular
+  });
   // Add the remaining text lines below
-  page.drawText("who executed the foregoing instrument and", {
-    x: centerX,
-    y: textY - lineHeight,
+  page.drawText("(is) (are) the individual(s) who executed the foregoing instrument and", {
+    x: 220,
+    y: 71,
     size: 10,
     font: fonts.regular
   });
   
   page.drawText("acknowledge it to be of free act and deed.", {
-    x: centerX,
-    y: textY - lineHeight * 2,
+    x: 53,
+    y: 59,
     size: 10,
     font: fonts.regular
   });
