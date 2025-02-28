@@ -60,19 +60,22 @@ interface SignatureSectionData {
 interface NotaryFooterData {
   notarySignatureImage: PDFImage | undefined;
   notarySealImage: PDFImage | undefined;
-  notaryPlace:{
+  notaryDate: {
     city: string;
     county: string;
     state: string;
-  };
-  notaryDate: {
     day: string;
     month: string;
     year: string;
   };
- 
+  notaryInfo: {
+    name: string;
+    id: string;
+    expirationDate: string;
+  };
 }
-// Near the top of your route handler function
+
+// Fix the logo in drawDocumentHeader
 function drawDocumentHeader(
   page: PDFPage,
   pdfDoc: PDFDocument,
@@ -392,7 +395,7 @@ function drawDocumentBody(
   currentY -= lineHeight
   
   // Certification text
-  const certText = "In accordance with the above mentioned shipment we certify that the above goods are of";
+  const certText = "In accordance with the above mentioned shipment we certify that above goods are of";
   const certTextWidth = fonts.regular.widthOfTextAtSize(certText, 10);
   page.drawText(certText, {
     x: (width - certTextWidth) / 2,
@@ -415,7 +418,7 @@ function drawDocumentBody(
   });
   
   // Return a larger spacing after the U.S.A. ORIGIN text
-  return currentY - lineHeight * 0.8; // Reduced spacing to bring "Yours faithfully" closer
+  return currentY - lineHeight * 1.5; // Increased spacing to lower "Yours faithfully"
 }
 
 // Fix the signature section to properly position elements and match the sample
@@ -432,8 +435,8 @@ function drawSignatureSection(
   const lineHeight = 14;
   const compactLineHeight = 12; // Smaller line height for signature block
   
-  // Start with "Yours faithfully" text - position closer to USA ORIGIN
-  let currentY = yStart - 10; // Reduced from 20 to 10 to bring it closer
+  // Start with "Yours faithfully" text - position similar to sample but lowered
+  let currentY = yStart - 20; // Increased from 10 to 20 to lower it further
   
   page.drawText("Yours faithfully,", {
     x: 50,
@@ -447,45 +450,25 @@ function drawSignatureSection(
   
   // Signature image with proper positioning
   if (data.signatureImage) {
-    const baseSignatureWidth = 150;
-    const baseSignatureHeight = 50;
-    // Compress horizontally by 3% and expand vertically by 3%
-    const signatureWidth = baseSignatureWidth * 0.97; // 3% narrower
-    const signatureHeight = baseSignatureHeight * 1.03; // 3% taller
-    
-    // Store the signature position for line positioning
-    const signatureY = currentY - signatureHeight + 20;
-    
+    const signatureWidth = 150;
+    const signatureHeight = 50;
     page.drawImage(data.signatureImage, {
       x: 50,
-      y: signatureY,
+      y: currentY - signatureHeight + 20,
       width: signatureWidth,
       height: signatureHeight
     });
-    
-    // Draw a line under the signature that slightly overlaps with it
-    // The line is moved up by 5 points to overlap with the bottom of the signature
-    const lineY = signatureY + 5; // Move line up by positioning it at signature bottom + 5
-    
-    page.drawLine({
-      start: { x: 50, y: lineY },
-      end: { x: 230, y: lineY }, // Extended from 200 to 230
-      thickness: 1,
-      color: rgb(0, 0, 0)
-    });
-    
-    // Update currentY to continue with the rest of the content
-    currentY = lineY - compactLineHeight;
-  } else {
-    // If no signature image, just draw the line
-    page.drawLine({
-      start: { x: 50, y: currentY },
-      end: { x: 230, y: currentY },
-      thickness: 1,
-      color: rgb(0, 0, 0)
-    });
-    currentY -= compactLineHeight;
+    currentY -= signatureHeight - 10;
   }
+  
+  // Draw a line under the signature - extend it slightly to match sample
+  page.drawLine({
+    start: { x: 50, y: currentY },
+    end: { x: 230, y: currentY }, // Extended from 200 to 230
+    thickness: 1,
+    color: rgb(0, 0, 0)
+  });
+  currentY -= compactLineHeight;
   
   // Name with comma separator to match sample
   page.drawText(data.signatoryName + ",", {
@@ -505,8 +488,8 @@ function drawSignatureSection(
   });
   currentY -= compactLineHeight;
   
-  // Use the company name properly
-  page.drawText(data.signatoryCompany, {
+  // Company name in proper format (not all caps) to match sample
+  page.drawText("Texas Worldwide Oil Services LLC", {
     x: 50,
     y: currentY,
     size: 10,
@@ -515,23 +498,23 @@ function drawSignatureSection(
   currentY -= compactLineHeight;
   
   // Address
-  page.drawText(data.signatoryAddress, {
+  page.drawText("4743 Merwin St, Houston TX 77027", {
     x: 50,
     y: currentY,
     size: 10,
     font: fonts.regular
   });
-  currentY -= compactLineHeight * 0.9; // Reduce spacing by 10%
+  currentY -= compactLineHeight;
   
   // Contact information
-  page.drawText(data.signatoryContact, {
+  page.drawText("USA Direct +1(713) 309-6637", {
     x: 50,
     y: currentY,
     size: 10,
     font: fonts.regular
   });
   
-  return currentY - lineHeight * 4; // Increased from 2.5 to 4 to create more space before footer
+  return currentY - lineHeight * 3; // Keep the original spacing to the footer
 }
 
 function drawDocumentFooter(
@@ -542,97 +525,46 @@ function drawDocumentFooter(
     bold: PDFFont;
   },
   yStart: number,
-  data: NotaryFooterData,
-  userName: string
+  data: NotaryFooterData
 ) {
   const { width, height } = page.getSize();
   const lineHeight = 14;
   
-  // Start the footer section - position properly
-  let footerCurrentY = yStart + 40;
+  // Simplified footer to match the sample's cleaner layout
+  let currentY = yStart;
   
-  // City, County, State on a single line at the bottom of the page
+  // City, County, State on a single line with proper capitalization
   page.drawText("CITY: Houston", {
-    x: 55,
-    y: footerCurrentY,
+    x: 50,
+    y: currentY,
     size: 10,
     font: fonts.regular
   });
   
   page.drawText("COUNTY: Harris", {
-    x: 260,
-    y: footerCurrentY,
+    x: 220,
+    y: currentY,
     size: 10,
     font: fonts.regular
   });
   
   page.drawText("STATE: TX", {
-    x: 470,
-    y: footerCurrentY,
+    x: 390,
+    y: currentY,
     size: 10,
     font: fonts.regular
   });
+  currentY += lineHeight * 1.5;
   
-  // Add proper spacing below the City/County/State line
-  const notaryY = footerCurrentY + lineHeight ;
-  
-  // Draw notary seal on the left side
-  if (data.notarySealImage) {
-    const sealWidth = 100;
-    const sealHeight = 60;
-    
-    page.drawImage(data.notarySealImage, {
-      x: 55,
-      y: notaryY - sealHeight,
-      width: sealWidth,
-      height: sealHeight
-    });
-  }
-  
-  // Draw notary signature on the right side
-  if (data.notarySignatureImage) {
-    const signatureWidth = 130;
-    const signatureHeight = 45;
-    
-    // Position signature at the right side
-    page.drawImage(data.notarySignatureImage, {
-      x: width - signatureWidth - 55,
-      y: notaryY - signatureHeight,
-      width: signatureWidth,
-      height: signatureHeight
-    });
-    
-    // // Add "(Notary Public)" text below the signature
-    // page.drawText("(Notary Public)", {
-    //   x: width - 125,
-    //   y: notaryY - signatureHeight - 15,
-    //   size: 10,
-    //   font: fonts.regular
-    // });
-  }
-  
-  // Position notary text in the middle, between seal and signature
-  const centerX = 200;
-  const textY = notaryY - 50; // Position text lower, at a better vertical position
-  
-  // Draw notary text on the left side of the signature
-  // Add a line with the authenticated user's name right before the "personally appeared" text
-  page.drawText(userName, {
-    x: centerX, 
-    y: textY + lineHeight,
-    size: 10,
-    font: fonts.regular
-  });
-
-  // Notary text to be positioned in the middle section  
+  // Clean date format similar to sample
   page.drawText("On this", {
-    x: centerX,
-    y: textY,
+    x: 50,
+    y: currentY,
     size: 10,
     font: fonts.regular
   });
   
-  // Date formatting
+  // Format date to match sample (1st day of November, 2024)
   const dateObj = new Date();
   const day = dateObj.getDate();
   const getOrdinalSuffix = (n: number): string => {
@@ -647,44 +579,71 @@ function drawDocumentFooter(
   const month = dateObj.toLocaleString('en-US', { month: 'long' });
   const year = dateObj.getFullYear();
   
-  page.drawText(`${day}${getOrdinalSuffix(day)} day of ${month}, ${year},`, {
-    x: centerX + 42,
-    y: textY,
-    size: 10,
-    font: fonts.regular
-  });
-  
-  // Second line of text (personally appeared before me)
-  page.drawText(userName, {
-    x: centerX,
-    y: textY - lineHeight * 0.5,
+  page.drawText(`${day}${getOrdinalSuffix(day)} day of ${month}, ${year}`, {
+    x: 90,
+    y: currentY,
     size: 10,
     font: fonts.regular
   });
   
   page.drawText("personally appeared before me,", {
-    x: centerX + 250,
-    y: textY,
+    x: 340,
+    y: currentY,
     size: 10,
     font: fonts.regular
   });
+  currentY += lineHeight;
   
-  // Add the remaining text lines below
+  // Simplified certification text into two clean lines instead of multiple segments
   page.drawText("who executed the foregoing instrument and", {
-    x: centerX,
-    y: textY - lineHeight,
+    x: 50,
+    y: currentY,
     size: 10,
     font: fonts.regular
   });
+  currentY += lineHeight;
   
   page.drawText("acknowledge it to be of free act and deed.", {
-    x: centerX,
-    y: textY - lineHeight * 2,
+    x: 50,
+    y: currentY,
     size: 10,
     font: fonts.regular
   });
+  currentY += lineHeight * 2;
   
-  return notaryY + 20; // Return proper position for the end of the document
+  // Draw notary seal at bottom left - slightly larger to match sample
+  if (data.notarySealImage) {
+    const sealWidth = 130; // Increased from 120
+    const sealHeight = 90; // Increased from 80
+    page.drawImage(data.notarySealImage, {
+      x: 50,
+      y: currentY - sealHeight + 20,
+      width: sealWidth,
+      height: sealHeight
+    });
+  }
+  
+  // Draw notary signature at bottom right - slightly larger to match sample
+  if (data.notarySignatureImage) {
+    const signatureWidth = 160; // Increased from 150
+    const signatureHeight = 65; // Increased from 60
+    page.drawImage(data.notarySignatureImage, {
+      x: width - signatureWidth - 50,
+      y: currentY - signatureHeight + 20,
+      width: signatureWidth,
+      height: signatureHeight
+    });
+    
+    // Add "(Notary Public)" text under signature to match sample
+    page.drawText("(Notary Public)", {
+      x: width - 120,
+      y: currentY - signatureHeight - 10,
+      size: 10,
+      font: fonts.regular
+    });
+  }
+  
+  return currentY - 80;
 }
 
 async function loadAssetImage(bucket: any, filename: string): Promise<Buffer | null> {
@@ -721,18 +680,6 @@ export async function POST(
     if (!session?.user?.isAdmin) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    
-    // Get authenticated user's name
-    const userName = session?.user?.name || 'Authorized Representative'
-    
-    // Debug logs
-    console.log("Session user:", {
-      id: session?.user?.id,
-      name: session?.user?.name,
-      email: session?.user?.email,
-      isAdmin: session?.user?.isAdmin
-    });
-    console.log("Using userName value:", userName);
 
     // Parse request body for mode and customDate
     const body = await request.json()
@@ -1083,7 +1030,7 @@ export async function POST(
     }
     
     // Get authenticated user's name
-    
+    const userName = session.user?.name || 'Authorized Representative';
 
     let y = 0;
     
@@ -1200,7 +1147,7 @@ export async function POST(
         }
       );
 
-      // Draw footer with notary information and authenticated user's name
+      // Draw footer with notary information
       const footerY = drawDocumentFooter(
         page,
         pdfDoc,
@@ -1209,19 +1156,20 @@ export async function POST(
         {
           notarySignatureImage,
           notarySealImage,
-          notaryPlace: {
+          notaryDate: {
             city: 'Houston',
             county: 'Harris',
             state: 'Texas',
-          },
-          notaryDate: {
             day: formattedBusinessDay,
             month: businessDateObj.toLocaleString('default', { month: 'long' }),
             year: businessDateObj.getFullYear().toString()
           },
-          
-        },
-        userName
+          notaryInfo: {
+            name: 'TOMAS ALVAREZ',
+            id: '133713739',
+            expirationDate: '03/14/2027'
+          }
+        }
       );
     }
 

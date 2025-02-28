@@ -79,6 +79,35 @@ export const authOptions = {
           if (adminUser) {
             console.log('JWT admin status set:', { isAdmin: true })
             token.isAdmin = true
+            
+            // Email-based name mapping for known users - this should take priority
+            const emailNameMap: {[key: string]: string} = {
+              'txwos.tomas@gmail.com': 'Tomas Alvarez',
+              'talvarez@txwos.com': 'Tomas Alvarez',
+              'de@txwos.com': 'Diego Ermoli',
+              'txwos.diego@gmail.com': 'Diego Ermoli'
+              // Add other email-to-name mappings as needed
+            };
+            
+            // First check if we have an explicit mapping for this email
+            if (emailNameMap[token.email.toLowerCase()]) {
+              // Use pre-defined mapping if available
+              token.name = emailNameMap[token.email.toLowerCase()];
+            }
+            // Otherwise use stored name if available
+            else if (adminUser.name) {
+              token.name = adminUser.name;
+            }
+            // Finally, try to extract a name from email
+            else {
+              // Extract name from email (e.g., firstname.lastname@domain.com -> Firstname Lastname)
+              const emailParts = token.email.split('@')[0].split('.');
+              token.name = emailParts.map(part => 
+                part.charAt(0).toUpperCase() + part.slice(1)
+              ).join(' ');
+            }
+            
+            console.log('Setting user name:', { email: token.email, name: token.name });
           } else {
             console.log('JWT admin status set:', { isAdmin: false })
             token.isAdmin = false
