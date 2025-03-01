@@ -113,7 +113,10 @@ export async function POST(
       headers: {
         'Content-Type': 'application/json',
         'Cookie': request.headers.get('cookie') || '' // Forward cookies for auth
-      }
+      },
+      body: JSON.stringify({
+        debug: true // Enable debug mode to see coordinates
+      })
     })
 
     if (!regenerateResponse.ok) {

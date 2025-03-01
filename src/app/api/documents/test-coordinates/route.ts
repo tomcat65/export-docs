@@ -14,11 +14,16 @@ export async function POST(request: NextRequest) {
     }
 
     // Get document ID and coordinates from request
-    const { documentId, coordinates, debug = true, skipLeftSide = false } = await request.json()
+    const { documentId, coordinates, debug } = await request.json()
+    
+    // Ensure debug is strictly boolean false by default
+    const debugMode = debug === true
     
     if (!documentId) {
       return NextResponse.json({ error: 'Document ID is required' }, { status: 400 })
     }
+    
+    console.log('Testing coordinates:', JSON.stringify(coordinates, null, 2));
     
     // Make a request to the regenerate endpoint with custom coordinates
     const regenerateUrl = `/api/documents/${documentId}/regenerate`
@@ -29,9 +34,8 @@ export async function POST(request: NextRequest) {
         'Cookie': request.headers.get('cookie') || '' // Forward cookies for auth
       },
       body: JSON.stringify({
-        coordinates,
-        debug,
-        skipLeftSide
+        coordinates, // Contains both topRight and original section coordinates
+        debug: debugMode // Ensure debug mode is explicitly boolean
       })
     })
     

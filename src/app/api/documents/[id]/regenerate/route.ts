@@ -52,6 +52,30 @@ function extractPackagingType(description: string): { packagingType: string, pac
   return { packagingType: 'Flexitank', packagingQty: 1 };
 }
 
+// Add a type definition for location object to handle clearOnly
+interface DocumentLocation {
+  sectionX: number;
+  sectionY: number;
+  sectionWidth: number;
+  sectionHeight: number;
+  titleX?: number;
+  titleY?: number;
+  docNumLabelX?: number;
+  docNumLabelY?: number;
+  docNumValueX?: number;
+  docNumValueY?: number;
+  dateLabelX?: number;
+  dateLabelY?: number;
+  dateValueX?: number;
+  dateValueY?: number;
+  poNumLabelX?: number;
+  poNumLabelY?: number;
+  poNumValueX?: number;
+  poNumValueY?: number;
+  poNumLineEndX?: number;
+  clearOnly?: boolean;
+}
+
 export async function POST(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
@@ -65,7 +89,8 @@ export async function POST(
     
     try {
       const reqBody = await request.json().catch(() => ({}));
-      if (reqBody.debug !== undefined) debugMode = reqBody.debug; // Allow override through request body
+      // Only set debugMode to true if explicitly true
+      debugMode = reqBody.debug === true;
       customCoordinates = reqBody.coordinates;
       skipLeftSide = reqBody.skipLeftSide === true;
       testPoNumber = reqBody.testPoNumber;
@@ -74,7 +99,7 @@ export async function POST(
     }
     
     if (debugMode) {
-      console.log('DEBUG MODE: Enabled - detailed logging will be shown and grid will be drawn');
+      console.log('DEBUG MODE: Enabled - detailed logging will be shown');
     }
     
     // Check authentication
@@ -239,38 +264,49 @@ export async function POST(
       });
       
       try {
-        // Define locations where Document Details sections appear - UPDATED BASED ON SCREENSHOT
-        const defaultLocations = [
+        // Define locations where Document Details sections appear - PROPERLY ADJUSTED COORDINATES
+        const defaultLocations: DocumentLocation[] = [
           // Top-right document details section
           {
             // White rectangle to completely cover the existing section
-            sectionX: 708,        // Starting X coordinate - moved right based on screenshot
-            sectionY: height - 50, // Starting Y coordinate from top
-            sectionWidth: 170,     // Width of the section - reduced width
-            sectionHeight: 150,    // Height of the section
+            sectionX: 345,         // X position from left edge
+            sectionY: 635,         // Y position from bottom
+            sectionWidth: 160,     // Width of the section
+            sectionHeight: 80,     // Height of the section
             
             // Section title
-            titleX: 715,
-            titleY: height - 65,
+            titleX: 348,
+            titleY: 632,
             
             // Document number field
-            docNumLabelX: 715,
-            docNumLabelY: height - 88,
-            docNumValueX: 805,
-            docNumValueY: height - 88,
+            docNumLabelX: 348,
+            docNumLabelY: 612,
+            docNumValueX: 430,
+            docNumValueY: 612,
             
             // Date field
-            dateLabelX: 715, 
-            dateLabelY: height - 110,
-            dateValueX: 805,
-            dateValueY: height - 110,
+            dateLabelX: 348, 
+            dateLabelY: 592,
+            dateValueX: 430,
+            dateValueY: 587,
             
             // PO Number field
-            poNumLabelX: 715,
-            poNumLabelY: height - 132,
-            poNumValueX: 805,
-            poNumValueY: height - 132,
-            poNumLineEndX: 875    // For drawing underline if no PO number
+            poNumLabelX: 348,
+            poNumLabelY: 572,
+            poNumValueX: 430,
+            poNumValueY: 572,
+            poNumLineEndX: 518    // For drawing underline if no PO number
+          },
+          // Original Document Details section (for overwriting)
+          {
+            // Define an area to completely cover the original Document Details section in the middle left
+            sectionX: 350,         // X position from left edge - UPDATED as specified
+            sectionY: 650,         // Y position from bottom - UPDATED as specified
+            sectionWidth: 170,     // Width of the section - UPDATED to 170px as requested
+            sectionHeight: 80,     // Height of the section
+            
+            // We'll only use this to clear the area, not to draw new content
+            clearOnly: true
           }
         ];
         
@@ -287,18 +323,50 @@ export async function POST(
               ...customCoordinates.topRight 
             };
           }
+          
+          // Update original section clearing if provided
+          if (customCoordinates.original && docDetailsLocations.length > 1) {
+            docDetailsLocations[1] = { 
+              ...docDetailsLocations[1], 
+              ...customCoordinates.original,
+              clearOnly: true // Always keep this as clearOnly
+            };
+          }
         }
         
-        // We'll only update the top-right section based on the screenshot
-        const sectionsToUpdate = [docDetailsLocations[0]];
+        // Determine which sections to update
+        let sectionsToUpdate = [docDetailsLocations[0]]; // Always update top-right
         
-        // Find and remove all existing Document Details sections first
-        // This is a more thorough approach to prevent duplicates
+        // Add the original section clearing if not explicitly skipped
+        if (!skipLeftSide && docDetailsLocations.length > 1) {
+          sectionsToUpdate.push(docDetailsLocations[1]);
+        }
         
-        // Update each document section
+        // First, clear all areas with white rectangles
         sectionsToUpdate.forEach((location, index) => {
-          const locationName = "top-right";
-          console.log(`Redrawing ${locationName} document details section`);
+          const locationName = index === 0 ? "top-right" : "original";
+          console.log(`Clearing ${locationName} document details section area`);
+          
+          // Clear the entire area by drawing a white rectangle
+          page.drawRectangle({
+            x: location.sectionX,
+            y: location.sectionY - location.sectionHeight,
+            width: location.sectionWidth,
+            height: location.sectionHeight,
+            color: backgroundColor,
+            opacity: 1.0 // Ensure it's fully opaque to cover existing content
+          });
+        });
+        
+        // Then, draw content on non-clearOnly sections
+        sectionsToUpdate.forEach((location, index) => {
+          const locationName = index === 0 ? "top-right" : "original";
+          
+          // Skip drawing content for sections marked as clearOnly
+          if (location.clearOnly === true) {
+            console.log(`${locationName} section marked as clearOnly - skipping content`);
+            return;
+          }
           
           // Skip if fonts couldn't be loaded
           if (!canDrawText) {
@@ -306,20 +374,12 @@ export async function POST(
             return;
           }
           
-          // First, clear the entire area by drawing a white rectangle
-          page.drawRectangle({
-            x: location.sectionX,
-            y: location.sectionY - location.sectionHeight, // Adjust Y to account for PDF coordinates starting from bottom
-            width: location.sectionWidth,
-            height: location.sectionHeight,
-            color: backgroundColor,
-            opacity: 1.0 // Ensure it's fully opaque to cover existing content
-          });
+          console.log(`Drawing content for ${locationName} document details section`);
           
           // Draw "Document Details:" header
           page.drawText("Document Details:", {
-            x: location.titleX,
-            y: location.titleY,
+            x: location.titleX!,
+            y: location.titleY!,
             size: 10,
             font: helveticaBold!,
             color: primaryColor
@@ -327,8 +387,8 @@ export async function POST(
           
           // Draw Document No label and value
           page.drawText("Document No:", {
-            x: location.docNumLabelX,
-            y: location.docNumLabelY,
+            x: location.docNumLabelX!,
+            y: location.docNumLabelY!,
             size: 9,
             font: helveticaBold!,
             color: primaryColor
@@ -336,8 +396,8 @@ export async function POST(
           
           if (document.packingListData.documentNumber) {
             page.drawText(document.packingListData.documentNumber, {
-              x: location.docNumValueX,
-              y: location.docNumValueY,
+              x: location.docNumValueX!,
+              y: location.docNumValueY!,
               size: 9,
               font: helvetica!,
               color: primaryColor
@@ -346,8 +406,8 @@ export async function POST(
           
           // Draw Date label and value
           page.drawText("Date:", {
-            x: location.dateLabelX,
-            y: location.dateLabelY,
+            x: location.dateLabelX!,
+            y: location.dateLabelY!,
             size: 9,
             font: helveticaBold!,
             color: primaryColor
@@ -355,8 +415,8 @@ export async function POST(
           
           if (document.packingListData.date) {
             page.drawText(document.packingListData.date, {
-              x: location.dateValueX,
-              y: location.dateValueY,
+              x: location.dateValueX!,
+              y: location.dateValueY!,
               size: 9,
               font: helvetica!,
               color: primaryColor
@@ -365,8 +425,8 @@ export async function POST(
           
           // Draw Client PO label and value
           page.drawText("Client PO:", {
-            x: location.poNumLabelX,
-            y: location.poNumLabelY,
+            x: location.poNumLabelX!,
+            y: location.poNumLabelY!,
             size: 9,
             font: helveticaBold!,
             color: primaryColor
@@ -380,8 +440,8 @@ export async function POST(
             
             // Draw the PO number value (even if it's an empty string)
             page.drawText(poValue, {
-              x: location.poNumValueX,
-              y: location.poNumValueY,
+              x: location.poNumValueX!,
+              y: location.poNumValueY!,
               size: 9,
               font: helvetica!,
               color: primaryColor
@@ -390,42 +450,13 @@ export async function POST(
             // Draw an underline if no PO number value (null/undefined)
             console.log('Drawing PO number underline (null/undefined value)');
             page.drawLine({
-              start: { x: location.poNumValueX, y: location.poNumValueY },
-              end: { x: location.poNumLineEndX, y: location.poNumValueY },
+              start: { x: location.poNumValueX!, y: location.poNumValueY! },
+              end: { x: location.poNumLineEndX!, y: location.poNumValueY! },
               thickness: 0.5,
               color: lightGray
             });
           }
         });
-        
-        if (debugMode) {
-          // Draw debug markers if in debug mode
-          page.drawCircle({
-            x: width / 2,
-            y: height / 2,
-            size: 5,
-            color: rgb(1, 0, 0) // Red circle in center for reference
-          });
-          
-          // Draw coordinate grid lines at 100 pixel intervals
-          for (let i = 0; i < width; i += 100) {
-            page.drawLine({
-              start: { x: i, y: 0 },
-              end: { x: i, y: height },
-              thickness: 0.5,
-              color: rgb(0.9, 0.9, 0.9) // Very light gray
-            });
-          }
-          
-          for (let i = 0; i < height; i += 100) {
-            page.drawLine({
-              start: { x: 0, y: i },
-              end: { x: width, y: i },
-              thickness: 0.5,
-              color: rgb(0.9, 0.9, 0.9) // Very light gray
-            });
-          }
-        }
       } catch (error) {
         console.error('Error updating PDF document fields:', error);
         // Continue with the process even if drawing fails
