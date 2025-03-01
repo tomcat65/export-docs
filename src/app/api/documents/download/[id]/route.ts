@@ -44,31 +44,60 @@ export async function GET(
       )
     }
     
-    const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-      bucketName: 'fs'
-    })
-
     // Convert fileId to ObjectId if it's a string
     const fileId = typeof document.fileId === 'string' 
       ? new mongoose.Types.ObjectId(document.fileId)
       : document.fileId;
 
-    console.log(`Attempting to download document ID: ${id}, fileId: ${fileId.toString()}, from bucket: 'fs'`);
+    console.log(`Attempting to download document ID: ${id}, fileId: ${fileId.toString()}`);
+    
+    let file = null;
+    let downloadStream = null;
+    let bucketUsed = '';
       
-    // Check if file exists
-    const file = await mongoose.connection.db.collection('fs.files').findOne({ _id: fileId })
+    // First try to get the file from the 'documents' bucket (newer documents)
+    try {
+      const documentsBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
+        bucketName: 'documents'
+      });
+      
+      file = await mongoose.connection.db.collection('documents.files').findOne({ _id: fileId });
+      
+      if (file) {
+        console.log(`Found file in GridFS 'documents' bucket: ${file.filename}, size: ${file.length} bytes`);
+        downloadStream = documentsBucket.openDownloadStream(fileId);
+        bucketUsed = 'documents';
+      }
+    } catch (error) {
+      console.log(`File not found in 'documents' bucket, will try 'fs' bucket next`);
+    }
+    
+    // If not found in 'documents', try the 'fs' bucket (older documents)
     if (!file) {
-      console.error(`File with ID ${fileId.toString()} not found in GridFS bucket 'fs'`);
+      try {
+        const fsBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
+          bucketName: 'fs'
+        });
+        
+        file = await mongoose.connection.db.collection('fs.files').findOne({ _id: fileId });
+        
+        if (file) {
+          console.log(`Found file in GridFS 'fs' bucket: ${file.filename}, size: ${file.length} bytes`);
+          downloadStream = fsBucket.openDownloadStream(fileId);
+          bucketUsed = 'fs';
+        }
+      } catch (error) {
+        console.error(`File with ID ${fileId.toString()} not found in any GridFS bucket`);
+      }
+    }
+    
+    // If file still not found, return 404
+    if (!file || !downloadStream) {
       return NextResponse.json(
         { error: 'File not found in GridFS' },
         { status: 404 }
-      )
+      );
     }
-    
-    console.log(`Found file in GridFS: ${file.filename}, size: ${file.length} bytes`);
-
-    // Get file stream
-    const downloadStream = bucket.openDownloadStream(fileId)
     
     // Convert stream to buffer
     const chunks: Buffer[] = []
@@ -77,6 +106,7 @@ export async function GET(
     }
     
     const buffer = Buffer.concat(chunks)
+    console.log(`Successfully retrieved file from '${bucketUsed}' bucket, size: ${buffer.length} bytes`);
 
     // Check if download parameter is present
     const url = new URL(req.url)

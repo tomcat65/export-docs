@@ -10,6 +10,49 @@ import { Client } from '@/models/Client'
 
 interface GenerateRequest {
   mode?: 'overwrite' | 'new'
+  poNumber?: string // Add Client PO number
+}
+
+// Helper function to extract product name from description
+function extractProductName(description: string): string {
+  if (!description) return '';
+  
+  // Remove packaging info patterns like "1 FLEXI TANK" or "10 IBC"
+  return description.replace(/^\d+\s+(?:FLEXI\s+TANK|FLEXITANK|FLEXI-TANK|IBC|DRUM|DRUMS|CONTAINER|BULK|TOTE)s?\s+/i, '')
+    .trim();
+}
+
+// Helper to extract packaging type from description
+function extractPackagingType(description: string): { packagingType: string, packagingQty: number } {
+  if (!description) return { packagingType: 'Flexitank', packagingQty: 1 };
+  
+  // Check for common packaging formats in the description (e.g., "1 FLEXI TANK" or "10 IBC")
+  const packagingMatch = description.match(/^(\d+)\s+(?:(FLEXI\s+TANK|FLEXITANK|FLEXI-TANK|IBC|DRUM|DRUMS|CONTAINER|BULK|TOTE)s?)/i);
+  
+  if (packagingMatch) {
+    const qty = parseInt(packagingMatch[1], 10) || 1;
+    let type = packagingMatch[2].trim();
+    
+    // Normalize packaging names
+    if (/FLEXI\s+TANK|FLEXITANK|FLEXI-TANK/i.test(type)) {
+      type = 'Flexitank';
+    } else if (/IBC/i.test(type)) {
+      type = 'IBC';
+    } else if (/DRUM|DRUMS/i.test(type)) {
+      type = 'Drum';
+    } else if (/CONTAINER/i.test(type)) {
+      type = 'Container';
+    } else if (/BULK/i.test(type)) {
+      type = 'Bulk';
+    } else if (/TOTE/i.test(type)) {
+      type = 'Tote';
+    }
+    
+    return { packagingType: type, packagingQty: qty };
+  }
+  
+  // Default to Flexitank if no match is found
+  return { packagingType: 'Flexitank', packagingQty: 1 };
 }
 
 export async function POST(
@@ -72,8 +115,10 @@ export async function POST(
       relatedBolId: bolDocument._id
     }).sort({ createdAt: -1 })
 
-    // Get mode from request (default to 'new')
-    const { mode = 'new' }: GenerateRequest = await req.json()
+    // Get mode and poNumber from request (default to 'new')
+    const reqData = await req.json() as GenerateRequest;
+    const mode = reqData.mode || 'new';
+    const poNumber = reqData.poNumber || '';
 
     // If mode is 'new' and there are existing PLs, create a new version
     // If mode is 'overwrite' and there are existing PLs, update the latest one
@@ -95,6 +140,18 @@ export async function POST(
     const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica)
     const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
     
+    // Colors
+    const primaryColor = rgb(0, 0, 0); // Black for main text for better readability
+    const secondaryColor = rgb(0.3, 0.3, 0.3); // Darker Gray for secondary text
+    const accentColor = rgb(0.95, 0.95, 0.95); // Very light gray for backgrounds
+    const dividerColor = rgb(0.8, 0.8, 0.8); // Medium gray for subtle dividers
+    
+    // Margins and spacing
+    const margin = 60; // Slightly tighter margins
+    const lineHeight = 15; // Tighter line height for compact info
+    const labelWidth = 85; // Width for labels to align values
+    const contentWidth = width - (margin * 2);
+    
     // Read logo file
     const logoPath = path.join(process.cwd(), 'public', 'txwos-logo.png')
     let logoImage;
@@ -102,14 +159,14 @@ export async function POST(
       const logoImageBytes = fs.readFileSync(logoPath)
       logoImage = await pdfDoc.embedPng(logoImageBytes)
       
-      // Calculate logo dimensions (maintain aspect ratio)
-      const logoWidth = 120
+      // Calculate logo dimensions (maintain aspect ratio - 150% larger)
+      const logoWidth = 75 // Increased from 50 to 75 (150% larger)
       const logoHeight = logoImage.height * (logoWidth / logoImage.width)
 
-      // Draw logo
+      // Draw logo - positioned in top-left corner
       page.drawImage(logoImage, {
-        x: 50,
-        y: height - 100,
+        x: margin,
+        y: height - margin/2 - logoHeight,
         width: logoWidth,
         height: logoHeight,
       })
@@ -118,434 +175,511 @@ export async function POST(
       // Continue without logo if there's an error
     }
 
-    // Header
+    // Start Y position for content
+    let currentY = height - margin - 60; // More space for the logo at top
+
+    // Document title - centered
     page.drawText('PACKING LIST', {
-      x: width / 2 - 80,
-      y: height - 80,
+      x: width / 2 - 70,
+      y: currentY,
       size: 18,
       font: helveticaBold,
+      color: primaryColor,
     })
+    currentY -= lineHeight;
+    
+    // Horizontal line below title
+    page.drawLine({
+      start: { x: margin, y: currentY },
+      end: { x: width - margin, y: currentY },
+      thickness: 0.75,
+      color: dividerColor,
+    })
+    
+    currentY -= lineHeight * 1.5;
 
-    // Document number
-    page.drawText(`Document No: ${packingListNumber}`, {
-      x: width - 250,
-      y: height - 120,
+    // Document details section (right-aligned) - Moved up to align with Shipper
+    const docInfoX = width - margin - 200; // Increased x-distance to prevent overlap
+    let docInfoY = currentY; // Now at same level as Shipper section
+
+    // Shipper info section with vertical layout
+    page.drawText('Shipper:', {
+      x: margin,
+      y: currentY,
+      size: 9,
+      font: helveticaBold,
+      color: secondaryColor,
+    })
+    
+    // Document details with clear heading
+    page.drawText('Document Details:', {
+      x: docInfoX,
+      y: docInfoY,
+      size: 9,
+      font: helveticaBold,
+      color: secondaryColor,
+    })
+    
+    currentY -= lineHeight;
+    docInfoY -= lineHeight;
+    
+    page.drawText('Texas Worldwide Oil Services, LLC', {
+      x: margin + 10,
+      y: currentY,
       size: 10,
-      font: helveticaFont,
+      font: helveticaBold,
+      color: primaryColor,
     })
-
-    // Date (use BOL date)
-    const bolDate = bolDocument.bolData?.date 
-      ? new Date(bolDocument.bolData.date).toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-        })
+    
+    // Document No label and value
+    page.drawText('Document No:', {
+      x: docInfoX,
+      y: docInfoY,
+      size: 9,
+      font: helveticaBold,
+      color: secondaryColor,
+    })
+    
+    page.drawText(packingListNumber, {
+      x: docInfoX + labelWidth,
+      y: docInfoY,
+      size: 9,
+      font: helveticaFont,
+      color: primaryColor,
+    })
+    
+    currentY -= lineHeight;
+    docInfoY -= lineHeight + 5; // Added extra spacing to prevent overlap with Date
+    
+    page.drawText('6300 N Main Rd, Houston, TX 77009, USA', {
+      x: margin + 10,
+      y: currentY,
+      size: 9,
+      font: helveticaFont,
+      color: primaryColor,
+    })
+    
+    // Date label and value
+    const bolDate = bolDocument.bolData?.dateOfIssue
+      ? bolDocument.bolData.dateOfIssue
       : new Date().toLocaleDateString('en-US', {
           year: 'numeric',
           month: 'long',
           day: 'numeric',
-        })
-
-    page.drawText(`Date: ${bolDate}`, {
-      x: width - 250,
-      y: height - 140,
-      size: 10,
-      font: helveticaFont,
-    })
-
-    // Exporter information
-    page.drawText('Exporter:', {
-      x: 50,
-      y: height - 160,
-      size: 12,
-      font: helveticaBold,
-    })
-
-    page.drawText(`${client.name}`, {
-      x: 50,
-      y: height - 180,
-      size: 10,
-      font: helveticaFont,
-    })
-
-    page.drawText(`${client.address?.street || ''}`, {
-      x: 50,
-      y: height - 195,
-      size: 10,
-      font: helveticaFont,
-    })
-
-    page.drawText(`${client.address?.city || ''}, ${client.address?.state || ''} ${client.address?.zip || ''}`, {
-      x: 50,
-      y: height - 210,
-      size: 10,
-      font: helveticaFont,
-    })
-
-    page.drawText(`${client.address?.country || ''}`, {
-      x: 50,
-      y: height - 225,
-      size: 10,
-      font: helveticaFont,
-    })
-
-    // Importer information
-    page.drawText('Importer:', {
-      x: width / 2,
-      y: height - 160,
-      size: 12,
-      font: helveticaBold,
-    })
-
-    const importerName = bolDocument.bolData?.consignee?.name || ''
-    const importerAddress = bolDocument.bolData?.consignee?.address || ''
+        });
     
-    page.drawText(importerName, {
-      x: width / 2,
-      y: height - 180,
-      size: 10,
-      font: helveticaFont,
+    page.drawText('Date:', {
+      x: docInfoX,
+      y: docInfoY,
+      size: 9,
+      font: helveticaBold,
+      color: secondaryColor,
     })
-
-    // Split address into multiple lines if needed
-    const addressLines = importerAddress.split('\n')
-    addressLines.forEach((line: string, index: number) => {
-      page.drawText(line, {
-        x: width / 2,
-        y: height - 195 - (index * 15),
-        size: 10,
+    
+    page.drawText(bolDate, {
+      x: docInfoX + labelWidth,
+      y: docInfoY,
+      size: 9,
+      font: helveticaFont,
+      color: primaryColor,
+    })
+    
+    currentY -= lineHeight * 1.5;
+    docInfoY -= lineHeight;
+    
+    // Always display Client PO field, with placeholder if not provided
+    page.drawText('Client PO:', {
+      x: docInfoX,
+      y: docInfoY,
+      size: 9,
+      font: helveticaBold,
+      color: secondaryColor,
+    })
+    
+    if (poNumber) {
+      page.drawText(poNumber, {
+        x: docInfoX + labelWidth,
+        y: docInfoY,
+        size: 9,
         font: helveticaFont,
+        color: primaryColor,
       })
-    })
-
-    // Booking information
-    const yPos = height - 280
-    
-    page.drawText('Booking Information:', {
-      x: 50,
-      y: yPos,
-      size: 12,
-      font: helveticaBold,
-    })
-
-    page.drawText(`Booking No: ${bolDocument.bolData?.bookingNumber || ''}`, {
-      x: 50,
-      y: yPos - 20,
-      size: 10,
-      font: helveticaFont,
-    })
-
-    page.drawText(`B/L No: ${bolDocument.bolData?.bolNumber || ''}`, {
-      x: 50,
-      y: yPos - 35,
-      size: 10,
-      font: helveticaFont,
-    })
-
-    page.drawText(`Vessel: ${bolDocument.bolData?.vessel || ''}`, {
-      x: 50,
-      y: yPos - 50,
-      size: 10,
-      font: helveticaFont,
-    })
-
-    page.drawText(`Voyage: ${bolDocument.bolData?.voyage || ''}`, {
-      x: 50,
-      y: yPos - 65,
-      size: 10,
-      font: helveticaFont,
-    })
-
-    page.drawText(`Port of Loading: ${bolDocument.bolData?.portOfLoading || ''}`, {
-      x: width / 2,
-      y: yPos - 20,
-      size: 10,
-      font: helveticaFont,
-    })
-
-    page.drawText(`Port of Discharge: ${bolDocument.bolData?.portOfDischarge || ''}`, {
-      x: width / 2,
-      y: yPos - 35,
-      size: 10,
-      font: helveticaFont,
-    })
-
-    page.drawText(`Place of Receipt: ${bolDocument.bolData?.placeOfReceipt || ''}`, {
-      x: width / 2,
-      y: yPos - 50,
-      size: 10,
-      font: helveticaFont,
-    })
-
-    page.drawText(`Place of Delivery: ${bolDocument.bolData?.placeOfDelivery || ''}`, {
-      x: width / 2,
-      y: yPos - 65,
-      size: 10,
-      font: helveticaFont,
-    })
-
-    // Container information
-    const containerYPos = yPos - 100
-    
-    page.drawText('Container Information:', {
-      x: 50,
-      y: containerYPos,
-      size: 12,
-      font: helveticaBold,
-    })
-
-    // Container table headers
-    const tableTop = containerYPos - 25
-    const colWidths = [120, 100, 100, 100, 100]
-    const colStarts = [50]
-    
-    for (let i = 1; i < colWidths.length; i++) {
-      colStarts[i] = colStarts[i-1] + colWidths[i-1]
+    } else {
+      // Add placeholder for PO number
+      page.drawText("_________________", {
+        x: docInfoX + labelWidth,
+        y: docInfoY,
+        size: 9,
+        font: helveticaFont,
+        color: rgb(0.7, 0.7, 0.7), // Light gray for placeholder
+      })
     }
-
-    // Draw table headers
-    page.drawText('Container No.', {
-      x: colStarts[0] + 10,
-      y: tableTop,
-      size: 10,
-      font: helveticaBold,
-    })
-
-    page.drawText('Seal No.', {
-      x: colStarts[1] + 10,
-      y: tableTop,
-      size: 10,
-      font: helveticaBold,
-    })
-
-    page.drawText('Type', {
-      x: colStarts[2] + 10,
-      y: tableTop,
-      size: 10,
-      font: helveticaBold,
-    })
-
-    page.drawText('Gross Weight', {
-      x: colStarts[3] + 10,
-      y: tableTop,
-      size: 10,
-      font: helveticaBold,
-    })
-
-    page.drawText('Net Weight', {
-      x: colStarts[4] + 10,
-      y: tableTop,
-      size: 10,
-      font: helveticaBold,
-    })
-
-    // Draw horizontal lines for table header
-    page.drawLine({
-      start: { x: 50, y: tableTop + 15 },
-      end: { x: width - 50, y: tableTop + 15 },
-      thickness: 1,
-      color: rgb(0, 0, 0),
-    })
-
-    page.drawLine({
-      start: { x: 50, y: tableTop - 5 },
-      end: { x: width - 50, y: tableTop - 5 },
-      thickness: 1,
-      color: rgb(0, 0, 0),
-    })
-
-    // Draw container data
-    let currentY = tableTop - 25
-    const containers = bolDocument.bolData?.containers || []
     
-    containers.forEach((container: any, index: number) => {
-      page.drawText(container.containerNumber || '', {
-        x: colStarts[0] + 10,
-        y: currentY,
-        size: 10,
-        font: helveticaFont,
-      })
+    docInfoY -= lineHeight;
 
-      page.drawText(container.sealNumber || '', {
-        x: colStarts[1] + 10,
-        y: currentY,
-        size: 10,
-        font: helveticaFont,
-      })
-
-      page.drawText(container.containerType || '', {
-        x: colStarts[2] + 10,
-        y: currentY,
-        size: 10,
-        font: helveticaFont,
-      })
-
-      page.drawText(`${container.grossWeight || ''} ${container.weightUnit || 'KG'}`, {
-        x: colStarts[3] + 10,
-        y: currentY,
-        size: 10,
-        font: helveticaFont,
-      })
-
-      page.drawText(`${container.netWeight || ''} ${container.weightUnit || 'KG'}`, {
-        x: colStarts[4] + 10,
-        y: currentY,
-        size: 10,
-        font: helveticaFont,
-      })
-
-      // Draw line after each row
-      currentY -= 20
-      page.drawLine({
-        start: { x: 50, y: currentY + 10 },
-        end: { x: width - 50, y: currentY + 10 },
-        thickness: 1,
-        color: rgb(0, 0, 0),
-      })
-    })
-
-    // Product information
-    const productYPos = currentY - 30
-    
-    page.drawText('Product Information:', {
-      x: 50,
-      y: productYPos,
-      size: 12,
+    // Consignee info section below shipper
+    page.drawText('Consignee:', {
+      x: margin,
+      y: currentY,
+      size: 9,
       font: helveticaBold,
+      color: secondaryColor,
     })
-
-    // Product table headers
-    const productTableTop = productYPos - 25
-    const productColWidths = [200, 100, 100, 150]
-    const productColStarts = [50]
+    currentY -= lineHeight;
     
-    for (let i = 1; i < productColWidths.length; i++) {
-      productColStarts[i] = productColStarts[i-1] + productColWidths[i-1]
+    // Format company name - add C.A. for Venezuelan companies if not already present
+    let companyName = client.name;
+    const isVenezuelanCompany = client.address && client.address.toLowerCase().includes('venezuela');
+    
+    // Only add C.A. if it's a Venezuelan company and doesn't already have C.A. in the name
+    if (isVenezuelanCompany && 
+        !companyName.includes('C.A.') && 
+        !companyName.includes('c.a.') && 
+        !companyName.includes('CA') && 
+        !companyName.includes('Compañía Anónima')) {
+      companyName = companyName.trim() + ' C.A.';
     }
-
-    // Draw product table headers
-    page.drawText('Description', {
-      x: productColStarts[0] + 10,
-      y: productTableTop,
-      size: 10,
-      font: helveticaBold,
-    })
-
-    page.drawText('Quantity', {
-      x: productColStarts[1] + 10,
-      y: productTableTop,
-      size: 10,
-      font: helveticaBold,
-    })
-
-    page.drawText('Unit', {
-      x: productColStarts[2] + 10,
-      y: productTableTop,
-      size: 10,
-      font: helveticaBold,
-    })
-
-    page.drawText('HS Code', {
-      x: productColStarts[3] + 10,
-      y: productTableTop,
-      size: 10,
-      font: helveticaBold,
-    })
-
-    // Draw horizontal lines for product table header
-    page.drawLine({
-      start: { x: 50, y: productTableTop + 15 },
-      end: { x: width - 50, y: productTableTop + 15 },
-      thickness: 1,
-      color: rgb(0, 0, 0),
-    })
-
-    page.drawLine({
-      start: { x: 50, y: productTableTop - 5 },
-      end: { x: width - 50, y: productTableTop - 5 },
-      thickness: 1,
-      color: rgb(0, 0, 0),
-    })
-
-    // Draw product data
-    let productCurrentY = productTableTop - 25
-    const items = bolDocument.bolData?.items || []
     
-    items.forEach((item: any, index: number) => {
-      page.drawText(item.description || '', {
-        x: productColStarts[0] + 10,
-        y: productCurrentY,
-        size: 10,
-        font: helveticaFont,
-      })
-
-      page.drawText(item.quantity?.toString() || '', {
-        x: productColStarts[1] + 10,
-        y: productCurrentY,
-        size: 10,
-        font: helveticaFont,
-      })
-
-      page.drawText(item.unit || '', {
-        x: productColStarts[2] + 10,
-        y: productCurrentY,
-        size: 10,
-        font: helveticaFont,
-      })
-
-      page.drawText(item.hsCode || '', {
-        x: productColStarts[3] + 10,
-        y: productCurrentY,
-        size: 10,
-        font: helveticaFont,
-      })
-
-      // Draw line after each row
-      productCurrentY -= 20
-      page.drawLine({
-        start: { x: 50, y: productCurrentY + 10 },
-        end: { x: width - 50, y: productCurrentY + 10 },
-        thickness: 1,
-        color: rgb(0, 0, 0),
-      })
+    page.drawText(companyName, {
+      x: margin + 10,
+      y: currentY,
+      size: 10,
+      font: helveticaBold,
+      color: primaryColor,
     })
-
+    currentY -= lineHeight;
+    
+    // Add RIF (Venezuelan tax ID) if it exists
+    if (client.rif) {
+      page.drawText(`RIF: ${client.rif}`, {
+        x: margin + 10,
+        y: currentY,
+        size: 9,
+        font: helveticaFont,
+        color: primaryColor,
+      });
+      currentY -= lineHeight;
+    }
+    
+    // Client address with proper spacing
+    if (client.address) {
+      const address = client.address.split('\n');
+      for (const line of address) {
+        page.drawText(line, {
+          x: margin + 10,
+          y: currentY,
+          size: 9,
+          font: helveticaFont,
+          color: primaryColor,
+        });
+        currentY -= lineHeight;
+      }
+    }
+    
+    // Divider between header and shipping details
+    currentY -= lineHeight;
+    
+    // Shipping Details Section with visual hierarchy
+    page.drawLine({
+      start: { x: margin, y: currentY },
+      end: { x: width - margin, y: currentY },
+      thickness: 0.75,
+      color: dividerColor,
+    })
+    
+    currentY -= lineHeight * 1.5;
+    
+    // Shipping details section with clear heading
+    page.drawText('Shipping Details', {
+      x: margin,
+      y: currentY,
+      size: 11,
+      font: helveticaBold,
+      color: primaryColor,
+    })
+    currentY -= lineHeight * 1.2;
+    
+    // Booking No with label-value layout
+    page.drawText('Booking No:', {
+      x: margin,
+      y: currentY,
+      size: 9,
+      font: helveticaBold,
+      color: secondaryColor,
+    })
+    
+    page.drawText(bolDocument.bolData?.bookingNumber || '', {
+      x: margin + labelWidth,
+      y: currentY,
+      size: 9,
+      font: helveticaFont,
+      color: primaryColor,
+    })
+    
+    // Container contents section with clear visual break
+    currentY -= lineHeight * 1.5;
+    
+    // Clearer container section header
+    page.drawText('Container Contents', {
+      x: margin,
+      y: currentY,
+      size: 11,
+      font: helveticaBold,
+      color: primaryColor,
+    })
+    currentY -= lineHeight * 1.5;
+    
+    // Get items from BOL document
+    const items = bolDocument.items || [];
+    
+    if (items.length > 0) {      
+      // Container table headers
+      const tableStartY = currentY;
+      
+      // Headers
+      const tableHeaders = ['Item', 'Container', 'Package Type', 'Product Description', 'Quantity'];
+      const colWidths = [40, 110, 90, 150, 50];
+      const colStarts = [margin];
+      
+      // Calculate column positions
+      for (let i = 1; i < colWidths.length; i++) {
+        colStarts[i] = colStarts[i-1] + colWidths[i-1];
+      }
+      
+      // Draw header backgrounds with subtle shading - slightly darker for better visibility
+      page.drawRectangle({
+        x: margin,
+        y: currentY - 3,
+        width: contentWidth,
+        height: lineHeight + 6,
+        color: accentColor,
+        borderWidth: 0,
+      });
+      
+      // Draw header texts
+      for (let i = 0; i < tableHeaders.length; i++) {
+        page.drawText(tableHeaders[i], {
+          x: colStarts[i] + 5,
+          y: currentY,
+          size: 9,
+          font: helveticaBold,
+          color: primaryColor,
+        });
+      }
+      currentY -= lineHeight + 8;
+      
+      // Draw items
+      let currentPage = page;
+      
+      // Group items by container
+      const containerGroups = new Map();
+      
+      for (const item of items) {
+        const containerNum = item.containerNumber || '';
+        if (!containerGroups.has(containerNum)) {
+          containerGroups.set(containerNum, []);
+        }
+        containerGroups.get(containerNum).push(item);
+      }
+      
+      // Draw each container and its items
+      let rowIndex = 0;
+      let containerIndex = 1; // Counter for container items
+      
+      for (const [containerNum, containerItems] of containerGroups.entries()) {
+        // For each container, determine if we need to group by packaging type
+        const packagingGroups = new Map();
+        
+        for (const item of containerItems) {
+          // Get product description - prefer the product field if available
+          const productDesc = item.product || extractProductName(item.description) || item.description;
+          
+          // Get packaging info
+          const packaging = item.packaging || 'Flexitank';
+          let packagingQty = item.packagingQuantity || 1;
+          
+          // If no explicit packaging is provided, try to extract from description
+          if (!item.packaging && item.description) {
+            const extracted = extractPackagingType(item.description);
+            if (packaging === 'Flexitank') { // Only override if we're using the default
+              packagingQty = extracted.packagingQty;
+            }
+          }
+          
+          const packagingKey = `${packaging}:${productDesc}`;
+          
+          if (!packagingGroups.has(packagingKey)) {
+            packagingGroups.set(packagingKey, {
+              packagingType: packaging,
+              productDesc: productDesc,
+              quantity: 0
+            });
+          }
+          
+          // Increment the quantity for this packaging type
+          packagingGroups.get(packagingKey).quantity += packagingQty;
+        }
+        
+        // Now draw each packaging group for this container
+        let firstItemInContainer = true;
+        
+        for (const [_, packageInfo] of packagingGroups.entries()) {
+          // Check if we need a new page
+          if (currentY < 100) {
+            // Add a new page
+            const newPage = pdfDoc.addPage([612, 792]);
+            currentPage = newPage;
+            currentY = height - 70;
+            
+            // Add "Continued" header
+            currentPage.drawText('Packing List (Continued)', {
+              x: width / 2 - 80,
+              y: currentY,
+              size: 12,
+              font: helveticaBold,
+              color: primaryColor,
+            });
+            currentY -= lineHeight * 2;
+            
+            // Redraw table headers on new page
+            currentPage.drawRectangle({
+              x: margin,
+              y: currentY - 3,
+              width: contentWidth,
+              height: lineHeight + 6,
+              color: accentColor,
+              borderWidth: 0,
+            });
+            
+            for (let i = 0; i < tableHeaders.length; i++) {
+              currentPage.drawText(tableHeaders[i], {
+                x: colStarts[i] + 5,
+                y: currentY,
+                size: 9,
+                font: helveticaBold,
+                color: primaryColor,
+              });
+            }
+            currentY -= lineHeight + 8;
+            
+            // Reset the firstItemInContainer flag as we're on a new page
+            firstItemInContainer = true;
+            rowIndex = 0; // Reset row index for background shading
+          }
+          
+          // Add subtle alternating row background for readability
+          if (rowIndex % 2 === 1) {
+            currentPage.drawRectangle({
+              x: margin,
+              y: currentY - 3,
+              width: contentWidth,
+              height: lineHeight + 6,
+              color: rgb(0.97, 0.97, 0.97), // Very subtle gray
+              borderWidth: 0,
+            });
+          }
+          
+          // Draw item number only for the first entry of each container
+          if (firstItemInContainer) {
+            currentPage.drawText(containerIndex.toString(), {
+              x: colStarts[0] + 5,
+              y: currentY,
+              size: 9,
+              font: helveticaFont,
+              color: primaryColor,
+            });
+          }
+          
+          // Draw container number only for the first item in the container
+          if (firstItemInContainer) {
+            currentPage.drawText(containerNum, {
+              x: colStarts[1] + 5,
+              y: currentY,
+              size: 9,
+              font: helveticaFont,
+              color: primaryColor,
+            });
+            firstItemInContainer = false;
+          }
+          
+          // Draw package type
+          currentPage.drawText(packageInfo.packagingType, {
+            x: colStarts[2] + 5,
+            y: currentY,
+            size: 9,
+            font: helveticaFont,
+            color: primaryColor,
+          });
+          
+          // Draw product description
+          currentPage.drawText(packageInfo.productDesc, {
+            x: colStarts[3] + 5,
+            y: currentY,
+            size: 9,
+            font: helveticaFont,
+            color: primaryColor,
+          });
+          
+          // Draw quantity
+          currentPage.drawText(packageInfo.quantity.toString(), {
+            x: colStarts[4] + 5,
+            y: currentY,
+            size: 9,
+            font: helveticaFont,
+            color: primaryColor,
+          });
+          
+          currentY -= lineHeight + 2;
+          rowIndex++;
+        }
+        
+        // Increment container index for the next container
+        containerIndex++;
+        
+        // Add a small gap between containers
+        currentY -= 3;
+      }
+    }
+    
     // Footer
-    const footerY = 100
+    const footerY = 50;
     
-    page.drawText('We hereby certify that the information contained in this Packing List is true and correct.', {
-      x: 50,
+    // Subtle divider above footer
+    page.drawLine({
+      start: { x: margin, y: footerY + 15 },
+      end: { x: width - margin, y: footerY + 15 },
+      thickness: 0.75,
+      color: dividerColor,
+    });
+    
+    // Company info in footer
+    page.drawText('Texas Worldwide Oil Services, LLC', {
+      x: margin,
       y: footerY,
-      size: 10,
+      size: 8,
+      font: helveticaBold,
+      color: secondaryColor,
+    });
+    
+    page.drawText('6300 N Main Rd, Houston, TX 77009, USA | Phone: +1 (713) 504-7322 | Email: info@txwos.com', {
+      x: margin,
+      y: footerY - 12,
+      size: 7,
       font: helveticaFont,
-    })
-
-    // Signature
-    page.drawText('Authorized Signature: _______________________', {
-      x: 50,
-      y: footerY - 40,
-      size: 10,
+      color: secondaryColor,
+    });
+    
+    // Page number at bottom right
+    page.drawText(`Page 1 of ${pdfDoc.getPageCount()}`, {
+      x: width - margin - 60,
+      y: footerY - 12,
+      size: 7,
       font: helveticaFont,
-    })
-
-    page.drawText(`Date: ${bolDate}`, {
-      x: 50,
-      y: footerY - 60,
-      size: 10,
-      font: helveticaFont,
-    })
-
-    // Company stamp
-    page.drawText('Company Stamp:', {
-      x: width / 2,
-      y: footerY - 40,
-      size: 10,
-      font: helveticaFont,
-    })
+      color: secondaryColor,
+    });
 
     // Generate PDF bytes
-    const pdfBytes = await pdfDoc.save()
+    const pdfBytes = await pdfDoc.save();
 
     // Store in GridFS
     if (!mongoose.connection.db) {
@@ -584,27 +718,16 @@ export async function POST(
           fileName: `${packingListNumber}.pdf`,
           packingListData: {
             documentNumber: packingListNumber,
-            date: bolDocument.bolData?.date || new Date(),
-            exporter: {
-              name: client.name,
-              address: `${client.address?.street || ''}, ${client.address?.city || ''}, ${client.address?.state || ''} ${client.address?.zip || ''}, ${client.address?.country || ''}`
-            },
-            importer: {
-              name: bolDocument.bolData?.consignee?.name || '',
-              address: bolDocument.bolData?.consignee?.address || ''
-            },
-            booking: {
-              bookingNumber: bolDocument.bolData?.bookingNumber || '',
-              bolNumber: bolDocument.bolData?.bolNumber || '',
-              vessel: bolDocument.bolData?.vessel || '',
-              voyage: bolDocument.bolData?.voyage || '',
-              portOfLoading: bolDocument.bolData?.portOfLoading || '',
-              portOfDischarge: bolDocument.bolData?.portOfDischarge || '',
-              placeOfReceipt: bolDocument.bolData?.placeOfReceipt || '',
-              placeOfDelivery: bolDocument.bolData?.placeOfDelivery || ''
-            },
-            containers: bolDocument.bolData?.containers || [],
-            items: bolDocument.bolData?.items || []
+            date: bolDocument.bolData?.dateOfIssue || new Date().toISOString(),
+            poNumber: poNumber,  // Include PO number even if empty
+            isEditable: true,    // Flag to indicate this document can be edited
+            address: {
+              company: client.name,
+              street: client.address?.split('\n')[0] || '',
+              details: client.address?.split('\n')[1] || '',
+              location: client.address?.split('\n')[2] || '',
+              country: client.address?.split('\n')[3] || '',
+            }
           },
           updatedAt: new Date()
         },
@@ -620,27 +743,16 @@ export async function POST(
         relatedBolId: bolDocument._id,
         packingListData: {
           documentNumber: packingListNumber,
-          date: bolDocument.bolData?.date || new Date(),
-          exporter: {
-            name: client.name,
-            address: `${client.address?.street || ''}, ${client.address?.city || ''}, ${client.address?.state || ''} ${client.address?.zip || ''}, ${client.address?.country || ''}`
-          },
-          importer: {
-            name: bolDocument.bolData?.consignee?.name || '',
-            address: bolDocument.bolData?.consignee?.address || ''
-          },
-          booking: {
-            bookingNumber: bolDocument.bolData?.bookingNumber || '',
-            bolNumber: bolDocument.bolData?.bolNumber || '',
-            vessel: bolDocument.bolData?.vessel || '',
-            voyage: bolDocument.bolData?.voyage || '',
-            portOfLoading: bolDocument.bolData?.portOfLoading || '',
-            portOfDischarge: bolDocument.bolData?.portOfDischarge || '',
-            placeOfReceipt: bolDocument.bolData?.placeOfReceipt || '',
-            placeOfDelivery: bolDocument.bolData?.placeOfDelivery || ''
-          },
-          containers: bolDocument.bolData?.containers || [],
-          items: bolDocument.bolData?.items || []
+          date: bolDocument.bolData?.dateOfIssue || new Date().toISOString(),
+          poNumber: poNumber,  // Include PO number even if empty
+          isEditable: true,    // Flag to indicate this document can be edited
+          address: {
+            company: client.name,
+            street: client.address?.split('\n')[0] || '',
+            details: client.address?.split('\n')[1] || '',
+            location: client.address?.split('\n')[2] || '',
+            country: client.address?.split('\n')[3] || '',
+          }
         },
         createdAt: new Date(),
         updatedAt: new Date()
@@ -649,7 +761,8 @@ export async function POST(
 
     return NextResponse.json({
       success: true,
-      document: documentRecord
+      document: documentRecord,
+      message: "Packing List generated. You can now edit the Document No, Date, and PO Number."
     })
   } catch (error) {
     console.error('Error generating packing list:', error)
