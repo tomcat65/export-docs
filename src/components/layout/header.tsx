@@ -30,6 +30,12 @@ export function Header() {
       setIsLoading(true)
       const response = await fetch('/api/documents/cleanup', {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          cleanupFiles: true
+        })
       })
       
       if (!response.ok) {
@@ -39,7 +45,7 @@ export function Header() {
       const result = await response.json()
       toast({
         title: 'Database Cleanup Complete',
-        description: result.message || `Cleaned up ${result.duplicatesDeleted} duplicate(s) and ${result.orphansDeleted} orphaned document(s)`,
+        description: result.message || `Cleaned up ${result.totalDeleted} items`,
       })
     } catch (error) {
       toast({
@@ -78,7 +84,7 @@ export function Header() {
               size="sm"
               className={cn(
                 'transition-colors hover:text-foreground/80',
-                isCleaning ? 'text-foreground' : 'text-foreground/60'
+                isLoading ? 'text-foreground' : 'text-foreground/60'
               )}
               onClick={handleCleanup}
               disabled={isLoading}

@@ -21,7 +21,17 @@ async function cleanupDuplicates(bucket: any) {
     if (!bolNumbers.has(bolNumber)) {
       bolNumbers.set(bolNumber, [])
     }
-    bolNumbers.get(bolNumber)!.push(doc._id)
+    
+    // Convert doc._id to ObjectId explicitly with proper type checking
+    if (doc._id) {
+      // Ensure doc._id is a valid ObjectId
+      try {
+        const docId = new Types.ObjectId(doc._id.toString());
+        bolNumbers.get(bolNumber)!.push(docId);
+      } catch (error) {
+        console.error(`Invalid ObjectId: ${doc._id}`, error);
+      }
+    }
   }
 
   let deletedCount = 0
@@ -55,6 +65,70 @@ async function cleanupDuplicates(bucket: any) {
   }
 
   return deletedCount
+}
+
+// Clean up duplicate packing list documents
+async function cleanupDuplicatePackingLists(bucket: any) {
+  console.log('Starting duplicate packing list cleanup...');
+  
+  // Find all BOL documents
+  const bolDocs = await Document.find({ type: 'BOL' }).lean();
+  let deletedCount = 0;
+  
+  // For each BOL, check its related packing lists
+  for (const bolDoc of bolDocs) {
+    if (!bolDoc._id) continue;
+    
+    // Find all packing lists related to this BOL
+    const plDocs = await Document.find({ 
+      type: 'PL',
+      relatedBolId: bolDoc._id 
+    }).sort({ createdAt: -1 }).lean();
+    
+    console.log(`BOL ${bolDoc._id}: Found ${plDocs.length} related packing lists`);
+    
+    if (plDocs.length <= 1) continue; // Skip if no duplicates
+    
+    // Group by document number
+    const docNumberGroups = new Map<string, any[]>();
+    
+    for (const plDoc of plDocs) {
+      const docNumber = plDoc.packingListData?.documentNumber || 'unknown';
+      if (!docNumberGroups.has(docNumber)) {
+        docNumberGroups.set(docNumber, []);
+      }
+      docNumberGroups.get(docNumber)!.push(plDoc);
+    }
+    
+    // For each document number, keep only the most recent
+    for (const [docNumber, docs] of docNumberGroups.entries()) {
+      if (docs.length <= 1) continue; // Skip if no duplicates
+      
+      // Sort by creation date (most recent first)
+      docs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      
+      // Skip the first (most recent) and delete the rest
+      for (let i = 1; i < docs.length; i++) {
+        const doc = docs[i];
+        try {
+          // Delete file
+          if (doc.fileId) {
+            await bucket.delete(new Types.ObjectId(doc.fileId));
+          }
+          
+          // Delete document
+          await Document.findByIdAndDelete(doc._id);
+          deletedCount++;
+          console.log(`Deleted duplicate packing list: ${doc._id} with document number ${docNumber}`);
+        } catch (error) {
+          console.error(`Error deleting packing list ${doc._id}:`, error);
+        }
+      }
+    }
+  }
+  
+  console.log(`Completed duplicate packing list cleanup: ${deletedCount} documents deleted`);
+  return deletedCount;
 }
 
 // Clean up orphaned documents (COO, PL) that reference BOLs that no longer exist
@@ -122,6 +196,122 @@ async function cleanupOrphans(bucket: any) {
   return orphanCount;
 }
 
+// Function to clean up duplicate documents by document type
+async function cleanupDuplicatesByType(bucket: any, documentType: 'BOL' | 'PL' | 'COO') {
+  console.log(`Starting cleanup of duplicate ${documentType} documents...`);
+  
+  // Find all documents of the specified type
+  const documents = await Document.find({ type: documentType }).lean();
+  console.log(`Found ${documents.length} ${documentType} documents`);
+  
+  // Group documents by their relatedBolId (for PL and COO) or by bolNumber (for BOL)
+  const groupedDocs = new Map<string, any[]>();
+  
+  for (const doc of documents) {
+    let groupKey: string;
+    
+    if (documentType === 'BOL' && doc.bolData?.bolNumber) {
+      // Group BOL documents by BOL number
+      groupKey = doc.bolData.bolNumber;
+    } else if (doc.relatedBolId) {
+      // Group PL and COO documents by related BOL ID and document number
+      const docNumber = documentType === 'PL' 
+        ? doc.packingListData?.documentNumber 
+        : doc.cooData?.certificateNumber;
+      
+      groupKey = `${doc.relatedBolId.toString()}-${docNumber || 'unknown'}`;
+    } else {
+      // Skip documents without a proper grouping key
+      continue;
+    }
+    
+    if (!groupedDocs.has(groupKey)) {
+      groupedDocs.set(groupKey, []);
+    }
+    
+    groupedDocs.get(groupKey)!.push(doc);
+  }
+  
+  let deletedCount = 0;
+  
+  // Process each group of documents
+  for (const [groupKey, docs] of groupedDocs.entries()) {
+    if (docs.length <= 1) {
+      // Skip if there's only one document in the group
+      continue;
+    }
+    
+    console.log(`Found ${docs.length} duplicate ${documentType} documents for group ${groupKey}`);
+    
+    // Sort by creation date (newest first)
+    docs.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    
+    // Keep the newest document, delete the rest
+    for (let i = 1; i < docs.length; i++) {
+      const doc = docs[i];
+      
+      try {
+        // Delete file from GridFS
+        if (doc.fileId) {
+          try {
+            await bucket.delete(new Types.ObjectId(doc.fileId));
+            console.log(`Deleted file ${doc.fileId} from GridFS`);
+          } catch (fileError) {
+            console.error(`Error deleting file ${doc.fileId}:`, fileError);
+          }
+        }
+        
+        // Delete document from database
+        await Document.findByIdAndDelete(doc._id);
+        deletedCount++;
+        console.log(`Deleted duplicate ${documentType} document: ${doc._id}`);
+      } catch (error) {
+        console.error(`Error deleting document ${doc._id}:`, error);
+      }
+    }
+  }
+  
+  console.log(`Completed ${documentType} cleanup: ${deletedCount} documents deleted`);
+  return deletedCount;
+}
+
+// Function to clean up orphaned files in GridFS
+async function cleanupOrphanedFiles(bucket: any) {
+  console.log('Starting cleanup of orphaned files...');
+  
+  // Get all document fileIds
+  const documents = await Document.find().lean();
+  const validFileIds = new Set(documents.map(doc => doc.fileId.toString()));
+  
+  console.log(`Found ${validFileIds.size} valid file IDs in documents collection`);
+  
+  // Get all files in the bucket
+  const filesCollection = bucket.s.db.collection(`${bucket.s.options.bucketName}.files`);
+  const files = await filesCollection.find({}).toArray();
+  
+  console.log(`Found ${files.length} files in GridFS bucket`);
+  
+  let deletedCount = 0;
+  
+  // Check each file if it's referenced by a document
+  for (const file of files) {
+    const fileId = file._id.toString();
+    
+    if (!validFileIds.has(fileId)) {
+      try {
+        await bucket.delete(file._id);
+        deletedCount++;
+        console.log(`Deleted orphaned file: ${fileId}`);
+      } catch (error) {
+        console.error(`Error deleting file ${fileId}:`, error);
+      }
+    }
+  }
+  
+  console.log(`Completed orphaned files cleanup: ${deletedCount} files deleted`);
+  return deletedCount;
+}
+
 export async function POST(request: NextRequest) {
   try {
     // Check authentication
@@ -131,58 +321,51 @@ export async function POST(request: NextRequest) {
     }
 
     await connectDB()
-
-    // Check if we should only clean COO documents (from the request)
-    let cleanupCooOnly = false;
-    try {
-      const requestData = await request.json();
-      cleanupCooOnly = !!requestData.cleanupCooOnly;
-    } catch (error) {
-      // If JSON parsing fails, assume default behavior
-      console.warn('Failed to parse request body:', error);
-    }
     
-    // Create GridFS buckets for both possible locations
-    const documentsBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db!, {
+    // Get cleanup options from request
+    const options = await request.json().catch(() => ({}));
+    const documentType = options.documentType as 'BOL' | 'PL' | 'COO' | undefined;
+    const cleanupFiles = options.cleanupFiles !== false; // Default to true
+    
+    // Create GridFS bucket
+    const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db!, {
       bucketName: 'documents'
     });
     
-    const fsBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db!, {
-      bucketName: 'fs'
-    });
+    let results = {
+      bolDeleted: 0,
+      plDeleted: 0,
+      cooDeleted: 0,
+      filesDeleted: 0
+    };
     
-    let duplicatesDeleted = 0;
-    let orphansDeleted = 0;
-    let cooDeleted = 0;
-    
-    // Clean only COO documents if requested
-    if (cleanupCooOnly) {
-      cooDeleted = await cleanupCooDuplicates(fsBucket);
-      
-      return NextResponse.json({
-        success: true,
-        cooDeleted,
-        message: `COO cleanup completed: ${cooDeleted} COO documents deleted`
-      });
-    } else {
-      // Regular cleanup
-      duplicatesDeleted = await cleanupDuplicates(documentsBucket);
-      orphansDeleted = await cleanupOrphans(documentsBucket); 
-      
-      // Also clean up documents in 'fs' bucket
-      try {
-        await cleanupOrphans(fsBucket);
-      } catch (error) {
-        console.error('Error cleaning up fs bucket:', error);
-      }
-      
-      return NextResponse.json({
-        success: true,
-        duplicatesDeleted,
-        orphansDeleted,
-        message: `Cleanup completed: ${duplicatesDeleted} duplicates and ${orphansDeleted} orphaned documents deleted`
-      });
+    // Clean up specific document type or all types
+    if (!documentType || documentType === 'BOL') {
+      results.bolDeleted = await cleanupDuplicatesByType(bucket, 'BOL');
     }
+    
+    if (!documentType || documentType === 'PL') {
+      results.plDeleted = await cleanupDuplicatesByType(bucket, 'PL');
+    }
+    
+    if (!documentType || documentType === 'COO') {
+      results.cooDeleted = await cleanupDuplicatesByType(bucket, 'COO');
+    }
+    
+    // Clean up orphaned files
+    if (cleanupFiles) {
+      results.filesDeleted = await cleanupOrphanedFiles(bucket);
+    }
+    
+    // Calculate total deleted
+    const totalDeleted = results.bolDeleted + results.plDeleted + results.cooDeleted + results.filesDeleted;
+    
+    return NextResponse.json({
+      success: true,
+      ...results,
+      totalDeleted,
+      message: `Cleanup completed: ${totalDeleted} items deleted (${results.bolDeleted} BOL, ${results.plDeleted} PL, ${results.cooDeleted} COO, ${results.filesDeleted} files)`
+    });
   } catch (error) {
     console.error('Error cleaning up documents:', error)
     return NextResponse.json(

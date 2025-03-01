@@ -1,6 +1,6 @@
 import mongoose from 'mongoose'
 
-interface IDocument {
+export interface IDocument {
   clientId: mongoose.Types.ObjectId
   fileName: string
   fileId: mongoose.Types.ObjectId  // GridFS file ID
@@ -9,6 +9,7 @@ interface IDocument {
   packingListData?: {
     documentNumber: string  // e.g. "1092-PL"
     date: string           // e.g. "12/26/2024"
+    poNumber?: string      // e.g. "key-2412-093"
     address: {
       company: string      // e.g. "Keystone CA"
       street: string      // e.g. "Zona Industrial III Carrera 2"
@@ -99,6 +100,7 @@ const documentSchema = new mongoose.Schema<IDocument>({
   packingListData: {
     documentNumber: String,
     date: String,
+    poNumber: String,
     address: {
       company: String,
       street: String,

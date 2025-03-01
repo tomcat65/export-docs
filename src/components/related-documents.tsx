@@ -187,13 +187,25 @@ export function RelatedDocuments({
   // Add handlers for edit functionality
   const handleOpenEditDialog = (doc: Document) => {
     setEditingPL(doc)
-    const poValue = doc.packingListData?.poNumber || '';
-    console.log('Opening edit dialog with PO number:', poValue, 'Type:', typeof poValue);
+    
+    // Properly handle the poNumber field, treating null/undefined as empty string
+    // but preserving actual empty strings
+    const poValue = doc.packingListData?.poNumber !== undefined && doc.packingListData?.poNumber !== null
+      ? String(doc.packingListData.poNumber) // Use String() for explicit conversion
+      : ''; // explicit empty string for null/undefined
+    
+    console.log('Opening edit dialog with PO number:', {
+      rawValue: doc.packingListData?.poNumber,
+      rawType: typeof doc.packingListData?.poNumber,
+      isEmpty: doc.packingListData?.poNumber === '',
+      finalValue: poValue,
+      finalType: typeof poValue
+    });
     
     setFormData({
       documentNumber: doc.packingListData?.documentNumber || '',
       date: doc.packingListData?.date || '',
-      poNumber: poValue
+      poNumber: poValue // Use the properly handled value
     })
     setEditDialogOpen(true)
   }
@@ -207,80 +219,94 @@ export function RelatedDocuments({
     }))
   }
 
-  const handleSubmitEdit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!editingPL) return
+  const handleSubmitEdit = async () => {
+    setIsSubmitting(true);
     
-    setIsSubmitting(true)
-
     try {
-      // Send the form data exactly as it is
+      // Log the form data being submitted
+      console.log('Submitting form data:', formData);
+      
+      // Create a data object with all form fields, explicitly handling empty strings
       const dataToSend = {
-        documentNumber: formData.documentNumber,
-        date: formData.date,
-        poNumber: formData.poNumber
+        documentNumber: formData.documentNumber !== undefined ? formData.documentNumber : '',
+        date: formData.date !== undefined ? formData.date : '',
+        // For poNumber, we need to be very explicit to ensure empty strings are preserved
+        // and not converted to null or undefined
+        poNumber: formData.poNumber !== undefined && formData.poNumber !== null 
+          ? String(formData.poNumber) // Use String() for explicit conversion 
+          : '' // Explicit empty string if undefined or null
       };
       
-      console.log('Submitting form data:', dataToSend);
+      // Add detailed logging to help diagnose the issue
+      console.log('Data being sent to API:', {
+        documentNumber: {
+          value: dataToSend.documentNumber,
+          type: typeof dataToSend.documentNumber,
+          length: dataToSend.documentNumber.length
+        },
+        date: {
+          value: dataToSend.date,
+          type: typeof dataToSend.date,
+          length: dataToSend.date.length
+        },
+        poNumber: {
+          value: dataToSend.poNumber,
+          type: typeof dataToSend.poNumber,
+          length: dataToSend.poNumber.length
+        }
+      });
       
-      // Step 1: Update the document details
-      const response = await fetch(`/api/documents/${editingPL._id}/update-details`, {
+      // Use the new update-details endpoint which handles both updating and regenerating
+      const response = await fetch(`/api/documents/${editingPL?._id}/update-details`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(dataToSend),
-      })
+      });
 
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to update document details')
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to update document');
       }
 
-      const updateResult = await response.json();
-      console.log('Document details updated successfully:', updateResult);
-
-      // Step 2: Regenerate the PDF
-      const regenerateResponse = await fetch(`/api/documents/${editingPL._id}/regenerate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      })
-
-      if (!regenerateResponse.ok) {
-        const errorData = await regenerateResponse.json()
-        throw new Error(errorData.error || 'Failed to regenerate document')
-      }
-
-      const result = await regenerateResponse.json()
-      console.log('Document regenerated successfully:', result);
+      const data = await response.json();
+      console.log('Update response:', data);
       
+      // Update the document in the list with the new data
+      const updatedDocuments = existingDocuments.map(doc => {
+        if (doc._id === editingPL?._id) {
+          return {
+            ...doc,
+            packingListData: {
+              ...doc.packingListData,
+              ...formData
+            }
+          };
+        }
+        return doc;
+      });
+      
+      setEditingPL(null);
+      setEditDialogOpen(false);
       toast({
-        title: 'Success',
-        description: 'Document updated and regenerated successfully',
-      })
-
-      // Open the document in a new tab if available
-      if (result.document?.id) {
-        window.open(`/api/documents/${result.document.id}/view`, '_blank')
-      }
-
-      // Close the dialog
-      setEditDialogOpen(false)
+        title: "Success",
+        description: "Document updated successfully",
+      });
       
-      // Trigger refresh
-      onDocumentGenerated()
+      // Refresh the document list to show updated data
+      onDocumentGenerated();
     } catch (error) {
+      console.error('Error updating document:', error);
       toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to update document details',
-        variant: 'destructive',
-      })
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to update document",
+        variant: "destructive",
+      });
     } finally {
-      setIsSubmitting(false)
+      setIsSubmitting(false);
     }
-  }
+  };
 
   // Modify renderDocumentButton to include Edit button for PL
   const renderDocumentButton = (type: 'PL' | 'COO') => {
@@ -445,18 +471,27 @@ export function RelatedDocuments({
                 </p>
               </div>
             </div>
-            <DialogFooter>
-              <Button type="submit" disabled={isSubmitting}>
+            <DialogFooter className="flex justify-between items-center">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setEditDialogOpen(false)}
+                disabled={isSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button 
+                type="button"
+                onClick={handleSubmitEdit}
+                disabled={isSubmitting}
+              >
                 {isSubmitting ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Processing...
+                    Saving...
                   </>
                 ) : (
-                  <>
-                    <Save className="mr-2 h-4 w-4" />
-                    Save & Regenerate
-                  </>
+                  "Save & Update"
                 )}
               </Button>
             </DialogFooter>

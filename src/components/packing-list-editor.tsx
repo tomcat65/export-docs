@@ -42,11 +42,12 @@ export function PackingListEditor({ documentId, details, onUpdate }: PackingList
   const [formData, setFormData] = useState<PackingListDetails>({
     documentNumber: details.documentNumber || '',
     date: details.date || '',
-    poNumber: details.poNumber || ''
+    poNumber: details.poNumber !== undefined && details.poNumber !== null ? String(details.poNumber) : ''
   })
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
+    console.log(`Form field ${name} changed to: "${value}"`)
     setFormData(prev => ({
       ...prev,
       [name]: value
@@ -58,12 +59,20 @@ export function PackingListEditor({ documentId, details, onUpdate }: PackingList
     setIsSubmitting(true)
 
     try {
+      const dataToSend = {
+        documentNumber: formData.documentNumber,
+        date: formData.date,
+        poNumber: formData.poNumber !== undefined && formData.poNumber !== null ? String(formData.poNumber) : ''
+      }
+      
+      console.log('Submitting data:', dataToSend)
+      
       const response = await fetch(`/api/documents/${documentId}/update-details`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(dataToSend),
       })
 
       if (!response.ok) {

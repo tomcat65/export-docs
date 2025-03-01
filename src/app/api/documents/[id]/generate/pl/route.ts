@@ -120,15 +120,22 @@ export async function POST(
     const mode = reqData.mode || 'new';
     const poNumber = reqData.poNumber || '';
 
-    // If mode is 'new' and there are existing PLs, create a new version
+    console.log(`Generating packing list with mode: ${mode}, existing PLs: ${existingPLs.length}`);
+
     // If mode is 'overwrite' and there are existing PLs, update the latest one
-    let packingListNumber = ''
+    // If mode is 'new' or there are no existing PLs, create a new version
+    let packingListNumber = '';
+    let existingDocument = null;
+    
     if (mode === 'overwrite' && existingPLs.length > 0) {
       // We'll overwrite the latest PL
-      packingListNumber = existingPLs[0].packingListData?.documentNumber || `${bolDocument.bolData?.bolNumber}-PL-1`
+      existingDocument = existingPLs[0];
+      packingListNumber = existingDocument.packingListData?.documentNumber || `${bolDocument.bolData?.bolNumber}-PL-1`;
+      console.log(`Overwriting existing document: ${existingDocument._id} with number: ${packingListNumber}`);
     } else {
       // Create a new PL with incremented number
-      packingListNumber = `${bolDocument.bolData?.bolNumber}-PL-${existingPLs.length + 1}`
+      packingListNumber = `${bolDocument.bolData?.bolNumber}-PL-${existingPLs.length + 1}`;
+      console.log(`Creating new document with number: ${packingListNumber}`);
     }
 
     // Create PDF document
@@ -693,8 +700,22 @@ export async function POST(
       bucketName: 'documents'
     })
 
-    const uploadStream = bucket.openUploadStream(`${packingListNumber}.pdf`)
-    const fileId = uploadStream.id
+    // If we're overwriting an existing document, delete its file first
+    if (existingDocument && existingDocument.fileId) {
+      try {
+        await bucket.delete(new mongoose.Types.ObjectId(existingDocument.fileId));
+        console.log(`Deleted existing file: ${existingDocument.fileId}`);
+      } catch (error) {
+        console.error('Error deleting existing file:', error);
+        // Continue even if delete fails
+      }
+    }
+
+    // Use the original filename if overwriting, or create a new one
+    const fileName = existingDocument?.fileName || `${packingListNumber}.pdf`;
+    const uploadStream = bucket.openUploadStream(fileName);
+    const fileId = uploadStream.id;
+    console.log(`Creating new file with ID: ${fileId} and name: ${fileName}`);
 
     // Write PDF to GridFS
     uploadStream.write(Buffer.from(pdfBytes))
@@ -706,16 +727,17 @@ export async function POST(
       uploadStream.on('error', reject)
     })
 
-    // Create document record
-    let documentRecord
+    // Create or update document record
+    let documentRecord;
 
-    if (mode === 'overwrite' && existingPLs.length > 0) {
+    if (existingDocument) {
       // Update existing document
       documentRecord = await Document.findByIdAndUpdate(
-        existingPLs[0]._id,
+        existingDocument._id,
         {
           fileId,
-          fileName: `${packingListNumber}.pdf`,
+          // Keep the original fileName to maintain consistency
+          fileName: existingDocument.fileName || fileName,
           packingListData: {
             documentNumber: packingListNumber,
             date: bolDocument.bolData?.dateOfIssue || new Date().toISOString(),
@@ -732,12 +754,13 @@ export async function POST(
           updatedAt: new Date()
         },
         { new: true }
-      )
+      );
+      console.log(`Updated existing document: ${documentRecord._id}`);
     } else {
       // Create new document
       documentRecord = await Document.create({
         clientId: bolDocument.clientId,
-        fileName: `${packingListNumber}.pdf`,
+        fileName: fileName,
         fileId,
         type: 'PL',
         relatedBolId: bolDocument._id,
