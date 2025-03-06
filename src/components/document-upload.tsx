@@ -71,6 +71,23 @@ export function DocumentUpload({ clientId }: DocumentUploadProps) {
 
       if (!response.ok) {
         const errorData = await response.json()
+        
+        // Special handling for client mismatch errors
+        if (errorData.status === 'client_mismatch') {
+          const message = errorData.suggestedClient 
+            ? `This document belongs to ${errorData.suggestedClient.name}. Please select the correct client.` 
+            : errorData.error;
+            
+          setIsProcessing(false)
+          toast({
+            title: 'Client Mismatch',
+            description: message,
+            variant: 'destructive',
+            duration: 5000 // Show for longer
+          })
+          return // Prevent further processing
+        }
+        
         throw new Error(errorData.error || 'Failed to upload document')
       }
 

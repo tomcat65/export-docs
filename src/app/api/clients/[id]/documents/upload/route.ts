@@ -14,6 +14,136 @@ interface RouteParams {
   id: string
 }
 
+// Helper function to normalize text for comparison
+function normalizeText(text: string): string {
+  if (!text || typeof text !== 'string') {
+    console.warn('Invalid text provided for normalization:', text);
+    return '';
+  }
+  
+  const normalized = text
+    .toLowerCase()
+    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '') // Remove punctuation
+    .replace(/\s+/g, ' ') // Normalize spaces
+    .trim();
+    
+  console.log('Text normalization:', { original: text, normalized });
+  return normalized;
+}
+
+// Helper function to validate consignee data
+function validateConsigneeData(consignee: any): { isValid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  
+  if (!consignee) {
+    errors.push('No consignee data found');
+    return { isValid: false, errors };
+  }
+  
+  if (!consignee.name || typeof consignee.name !== 'string' || consignee.name.trim().length === 0) {
+    errors.push('Invalid or missing consignee name');
+  }
+  
+  if (consignee.name && consignee.name.length < 3) {
+    errors.push('Consignee name is suspiciously short');
+  }
+  
+  // Log the validation results
+  console.log('Consignee validation:', {
+    consignee,
+    errors,
+    isValid: errors.length === 0
+  });
+  
+  return { isValid: errors.length === 0, errors };
+}
+
+// Helper function to verify client match
+function verifyClientMatch(consignee: { name: string; taxId?: string }, client: any): boolean {
+  // First validate the input data
+  const { isValid, errors } = validateConsigneeData(consignee);
+  if (!isValid) {
+    console.error('Invalid consignee data:', errors);
+    return false;
+  }
+  
+  // Normalize names for comparison
+  const normalizedConsigneeName = normalizeText(consignee.name);
+  const normalizedClientName = normalizeText(client.name);
+  
+  // Log the normalized values for debugging
+  console.log('Comparing normalized names:', {
+    originalConsignee: consignee.name,
+    originalClient: client.name,
+    normalizedConsignee: normalizedConsigneeName,
+    normalizedClient: normalizedClientName,
+  });
+  
+  // Check for empty values after normalization
+  if (!normalizedConsigneeName || !normalizedClientName) {
+    console.error('Empty normalized name(s):', {
+      normalizedConsignee: normalizedConsigneeName,
+      normalizedClient: normalizedClientName
+    });
+    return false;
+  }
+  
+  // First try exact match after normalization
+  if (normalizedConsigneeName === normalizedClientName) {
+    console.log('Exact name match found');
+    return true;
+  }
+  
+  // Try for substring match but be cautious - partial matches are risky
+  if (normalizedConsigneeName.includes(normalizedClientName) || 
+      normalizedClientName.includes(normalizedConsigneeName)) {
+    
+    // If it's just a substring match, it needs to be substantial
+    const shorterLength = Math.min(normalizedConsigneeName.length, normalizedClientName.length);
+    const longerLength = Math.max(normalizedConsigneeName.length, normalizedClientName.length);
+    
+    // If the shorter string is less than 50% of the longer one, it's too risky
+    if (shorterLength < longerLength * 0.5) {
+      console.error('Substring match found but too weak:', {
+        shorterLength,
+        longerLength,
+        ratio: shorterLength / longerLength
+      });
+      return false;
+    }
+    
+    console.log('Strong substring match found');
+    return true;
+  }
+  
+  // Then try RIF/Tax ID match if available
+  if (consignee.taxId && client.rif) {
+    const normalizedConsigneeTaxId = normalizeText(consignee.taxId);
+    const normalizedClientRif = normalizeText(client.rif);
+    
+    console.log('Comparing tax IDs:', {
+      consigneeTaxId: normalizedConsigneeTaxId,
+      clientRif: normalizedClientRif
+    });
+    
+    if (normalizedConsigneeTaxId === normalizedClientRif) {
+      console.log('Tax ID match found');
+      return true;
+    }
+  }
+  
+  // Log the comparison failure details
+  console.log('Client verification failed:', {
+    consigneeName: normalizedConsigneeName,
+    clientName: normalizedClientName,
+    consigneeTaxId: consignee.taxId,
+    clientRif: client.rif,
+    rawConsigneeData: consignee
+  });
+  
+  return false;
+}
+
 // Helper function to clean up old files
 async function cleanupOldFiles(bucket: any, fileName: string, bolNumber?: string) {
   try {
@@ -156,6 +286,69 @@ export async function POST(
     const documentData = JSON.parse(documentStr) as { type: 'pdf' | 'image'; data: string }
 
     try {
+      // Process document with Claude FIRST to verify the client match
+      console.log('Processing document with Claude to verify client match')
+      const processedData = await processDocumentWithClaude(documentData)
+      
+      if (!processedData || !processedData.shipmentDetails || !processedData.shipmentDetails.bolNumber) {
+        console.error('Failed to extract required information:', processedData)
+        throw new Error('Failed to extract required information from document')
+      }
+
+      // CRITICAL: Verify that the consignee matches the selected client
+      if (!processedData.parties?.consignee) {
+        console.error('No consignee data found in the document')
+        return NextResponse.json(
+          { error: 'Failed to extract consignee information from the document' },
+          { status: 400 }
+        )
+      }
+
+      // Log the extracted data for debugging
+      console.log('Extracted consignee data:', {
+        name: processedData.parties.consignee.name,
+        taxId: processedData.parties.consignee.taxId,
+        address: processedData.parties.consignee.address
+      })
+      console.log('Selected client:', {
+        name: client.name,
+        rif: client.rif
+      })
+
+      // Verify client match
+      const isClientMatch = verifyClientMatch(processedData.parties.consignee, client)
+      if (!isClientMatch) {
+        // Find all clients to see if there's a match with any other client
+        const allClients = await Client.find({})
+        const matchingClient = allClients.find(c => 
+          c._id.toString() !== client._id.toString() && 
+          verifyClientMatch(processedData.parties.consignee, c)
+        )
+        
+        const errorMessage = matchingClient
+          ? `This BOL belongs to ${matchingClient.name}, not ${client.name}. Please select the correct client.`
+          : `This BOL doesn't appear to belong to ${client.name}. Please verify the selected client.`
+        
+        console.error(errorMessage)
+        
+        // Return a graceful error response instead of throwing an error
+        return NextResponse.json({ 
+          error: errorMessage,
+          status: 'client_mismatch',
+          suggestedClient: matchingClient ? {
+            id: matchingClient._id.toString(),
+            name: matchingClient.name
+          } : null
+        }, { status: 400 })
+      }
+
+      console.log('Client verification passed:', {
+      clientId: client._id,
+        clientName: client.name,
+        bolNumber: processedData.shipmentDetails.bolNumber
+      })
+
+      // If verification passed, proceed with storing the document
       // Store file in MongoDB GridFS
       const db = mongoose.connection.db
       if (!db) {
@@ -194,14 +387,6 @@ export async function POST(
           .on('finish', resolve)
       })
 
-      // Process document with Claude
-      const processedData = await processDocumentWithClaude(documentData)
-      
-      if (!processedData || !processedData.shipmentDetails || !processedData.shipmentDetails.bolNumber) {
-        console.error('Failed to extract required information:', processedData)
-        throw new Error('Failed to extract required information from document')
-      }
-
       // Clean up any existing files with the same BOL number
       await cleanupOldFiles(bucket, file.name, processedData.shipmentDetails.bolNumber)
 
@@ -236,6 +421,7 @@ export async function POST(
           bolNumber: processedData.shipmentDetails.bolNumber,
           bookingNumber: processedData.shipmentDetails.bookingNumber || '',
           shipper: processedData.parties.shipper.name,
+          carrierReference: processedData.shipmentDetails.carrierReference || '',
           vessel: processedData.shipmentDetails.vesselName || '',
           voyage: processedData.shipmentDetails.voyageNumber || '',
           portOfLoading: processedData.shipmentDetails.portOfLoading,
@@ -282,7 +468,7 @@ export async function POST(
         { new: true }
       )
 
-      return NextResponse.json({
+    return NextResponse.json({
         success: true,
         documentId: existingDocument._id.toString(),
         document: {

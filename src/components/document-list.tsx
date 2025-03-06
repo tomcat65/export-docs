@@ -21,7 +21,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { Eye, FileText, Download, Trash2, ChevronDown, ChevronUp, Calendar } from 'lucide-react'
+import { Eye, FileText, Download, Trash2, ChevronDown, ChevronUp, Calendar, SortAsc, SortDesc, Clock } from 'lucide-react'
 import { useToast } from '@/components/ui/use-toast'
 import {
   Card,
@@ -51,6 +51,7 @@ interface Item {
 interface BolData {
   bolNumber: string
   bookingNumber?: string
+  carrierReference?: string
   date?: string
   dateOfIssue?: string
   vessel?: string
@@ -109,13 +110,40 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
   const [expandedShipmentDetails, setExpandedShipmentDetails] = useState<Record<string, boolean>>({})
   const [dateInputs, setDateInputs] = useState<Record<string, string>>({})
   const [isSubmittingDate, setIsSubmittingDate] = useState<Record<string, boolean>>({})
+  const [searchQuery, setSearchQuery] = useState<string>('')
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc') // 'desc' for newest first (default)
 
+  // Toggle sort order and display appropriate toast message
+  const toggleSortOrder = () => {
+    const newOrder = sortOrder === 'asc' ? 'desc' : 'asc'
+    setSortOrder(newOrder)
+    toast({
+      title: `Documents sorted by ${newOrder === 'asc' ? 'oldest' : 'newest'} first`,
+      duration: 2000,
+    })
+  }
+
+  // Filter documents based on search query
+  const filteredDocuments = searchQuery.trim() 
+    ? documents.filter(doc => {
+        const bolNumber = doc.bolData?.bolNumber?.toLowerCase() || '';
+        const dateOfIssue = doc.bolData?.dateOfIssue?.toLowerCase() || '';
+        const carrierReference = doc.bolData?.carrierReference?.toLowerCase() || '';
+        const query = searchQuery.toLowerCase();
+        
+        return bolNumber.includes(query) || 
+               dateOfIssue.includes(query) ||
+               carrierReference.includes(query);
+      })
+    : documents;
+
+  // Sort the grouped objects by date
   useEffect(() => {
     // Group documents by BOL number
     const grouped: Record<string, Document[]> = {}
     
     // First, add all BOL documents
-    documents.forEach(doc => {
+    filteredDocuments.forEach(doc => {
       if (doc.type === 'BOL' && doc.bolData?.bolNumber) {
         const bolNumber = doc.bolData.bolNumber
         if (!grouped[bolNumber]) {
@@ -126,10 +154,10 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
     })
     
     // Then add related documents
-    documents.forEach(doc => {
+    filteredDocuments.forEach(doc => {
       if (doc.type !== 'BOL' && doc.relatedBolId) {
         // Find the BOL document
-        const bolDoc = documents.find(d => d._id === doc.relatedBolId)
+        const bolDoc = filteredDocuments.find(d => d._id === doc.relatedBolId)
         if (bolDoc?.bolData?.bolNumber) {
           const bolNumber = bolDoc.bolData.bolNumber
           if (grouped[bolNumber]) {
@@ -138,6 +166,82 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
         }
       }
     })
+
+    // Get the BOL documents for sorting - completely rewritten date handling
+    const sortableEntries = Object.entries(grouped).map(([bolNumber, docs]) => {
+      const bolDoc = docs.find(doc => doc.type === 'BOL')
+      
+      // Extract date data with improved parsing
+      let dateString = bolDoc?.bolData?.dateOfIssue || '';
+      let dateObj = null;
+      
+      // For YYYY-MM-DD format
+      if (dateString.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        const [year, month, day] = dateString.split('-').map(Number);
+        dateObj = new Date(year, month - 1, day); // months are 0-indexed in JS
+      } 
+      // For MMM/DD/YYYY format (like MAR/10/2025)
+      else if (dateString.match(/^[A-Z]{3}\/\d{1,2}\/\d{4}$/i)) {
+        const parts = dateString.split('/');
+        const monthMap: Record<string, number> = {
+          'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3, 'MAY': 4, 'JUN': 5,
+          'JUL': 6, 'AUG': 7, 'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11
+        };
+        const month = monthMap[parts[0].toUpperCase()];
+        const day = parseInt(parts[1]);
+        const year = parseInt(parts[2]);
+        
+        if (!isNaN(month) && !isNaN(day) && !isNaN(year)) {
+          dateObj = new Date(year, month, day);
+        }
+      } 
+      // Fallback to standard date parsing
+      else if (dateString) {
+        dateObj = new Date(dateString);
+        // Check if it's a valid date
+        if (isNaN(dateObj.getTime())) {
+          dateObj = null;
+        }
+      }
+      
+      // If we couldn't parse the date, fall back to creation date
+      if (!dateObj && bolDoc) {
+        dateObj = new Date(bolDoc.createdAt);
+      }
+      
+      // If still no date, use epoch (very old date)
+      if (!dateObj) {
+        dateObj = new Date(0);
+      }
+      
+      return {
+        bolNumber,
+        docs,
+        date: dateObj,
+        // For debugging, include the raw date too
+        rawDate: dateString || 'N/A'
+      };
+    });
+    
+    // Simple, clear sorting logic
+    sortableEntries.sort((a, b) => {
+      const timeA = a.date.getTime();
+      const timeB = b.date.getTime();
+      
+      if (sortOrder === 'desc') { // Newest first
+        return timeB - timeA;
+      } else { // Oldest first
+        return timeA - timeB;
+      }
+    });
+    
+    // Rebuild the sorted grouped object
+    const sortedGrouped: Record<string, Document[]> = {}
+    sortableEntries.forEach(entry => {
+      sortedGrouped[entry.bolNumber] = entry.docs
+    });
+    
+    setGroupedDocuments(sortedGrouped)
     
     // Initialize expanded states
     let initialExpandState: Record<string, boolean> = {}
@@ -177,10 +281,9 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
       }
     })
     
-    setGroupedDocuments(grouped)
     setExpandedCards(initialExpandState)
     setExpandedShipmentDetails(initialShipmentDetailsState)
-  }, [documents])
+  }, [filteredDocuments, sortOrder])
 
   // Save state to sessionStorage when it changes
   useEffect(() => {
@@ -313,6 +416,44 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
     }
   }
 
+  // Format the date for display consistently
+  const formatDateDisplay = (dateString: string): string => {
+    if (!dateString) return 'N/A';
+    
+    // For YYYY-MM-DD format
+    if (dateString.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      return dateString; // Already in the correct format
+    }
+    
+    // For MMM/DD/YYYY format
+    if (dateString.match(/^[A-Z]{3}\/\d{1,2}\/\d{4}$/i)) {
+      const parts = dateString.split('/');
+      const monthMap: Record<string, number> = {
+        'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3, 'MAY': 4, 'JUN': 5,
+        'JUL': 6, 'AUG': 7, 'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11
+      };
+      const month = monthMap[parts[0].toUpperCase()];
+      const day = parseInt(parts[1]);
+      const year = parseInt(parts[2]);
+      
+      if (!isNaN(month) && !isNaN(day) && !isNaN(year)) {
+        return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      }
+    }
+    
+    // Try standard date parsing
+    const date = new Date(dateString);
+    if (!isNaN(date.getTime())) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    
+    // Return the original if we couldn't parse it
+    return dateString;
+  }
+
   if (documents.length === 0) {
     return (
       <Card>
@@ -325,6 +466,53 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
 
   return (
     <div className="space-y-6">
+      {/* Search and sort controls */}
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-2">
+          <div className="relative flex-1 mr-4">
+            <input
+              type="text"
+              placeholder="Search by BOL Number, Date, or Carrier's Reference..."
+              className="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button
+                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                onClick={() => setSearchQuery('')}
+              >
+                ×
+              </button>
+            )}
+          </div>
+          
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={toggleSortOrder}
+            className="flex items-center gap-1"
+          >
+            <Clock className="h-4 w-4" />
+            {sortOrder === 'asc' ? (
+              <>
+                <SortAsc className="h-4 w-4" />
+                <span className="hidden sm:inline">Oldest First</span>
+              </>
+            ) : (
+              <>
+                <SortDesc className="h-4 w-4" />
+                <span className="hidden sm:inline">Newest First</span>
+              </>
+            )}
+          </Button>
+        </div>
+        
+        {searchQuery && filteredDocuments.length === 0 && (
+          <p className="mt-2 text-sm text-gray-500">No documents found matching your search.</p>
+        )}
+      </div>
+
       {Object.entries(groupedDocuments).map(([bolNumber, docs]) => {
         const bolDoc = docs.find(doc => doc.type === 'BOL')
         const isExpanded = expandedCards[bolNumber] || false
@@ -336,21 +524,37 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
               className="cursor-pointer hover:bg-muted transition-colors"
               onClick={() => toggleCardExpansion(bolNumber)}
             >
-              <div className="flex justify-between items-center">
-                <div className="flex flex-col">
-                  <CardTitle>BOL: {bolNumber}</CardTitle>
+              <div className="flex justify-between items-start">
+                <div className="flex flex-col space-y-1">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <CardTitle className="text-lg font-bold">BOL: {bolNumber}</CardTitle>
+                    {bolDoc && bolDoc.bolData?.dateOfIssue && (
+                      <span className="inline-flex items-center text-sm font-medium bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 px-2 py-1 rounded">
+                        <Calendar className="h-3 w-3 mr-1" />
+                        {formatDateDisplay(bolDoc.bolData.dateOfIssue)}
+                      </span>
+                    )}
+                    {bolDoc && bolDoc.bolData?.carrierReference && (
+                      <span className="inline-flex items-center text-sm font-medium bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 px-2 py-1 rounded">
+                        <FileText className="h-3 w-3 mr-1" />
+                        {bolDoc.bolData.carrierReference}
+                      </span>
+                    )}
+                  </div>
                   {bolDoc && !bolDoc.bolData?.dateOfIssue && (
-                    <span className="text-xs text-amber-600 dark:text-amber-400 mt-1 flex items-center">
+                    <span className="text-xs text-amber-600 dark:text-amber-400 flex items-center">
                       <Calendar className="h-3 w-3 mr-1" />
                       Missing date
                     </span>
                   )}
                 </div>
-                {isExpanded ? (
-                  <ChevronUp className="h-5 w-5" />
-                ) : (
-                  <ChevronDown className="h-5 w-5" />
-                )}
+                <div className="mt-1">
+                  {isExpanded ? (
+                    <ChevronUp className="h-5 w-5" />
+                  ) : (
+                    <ChevronDown className="h-5 w-5" />
+                  )}
+                </div>
               </div>
             </CardHeader>
             
@@ -475,6 +679,13 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
                               <p className="text-sm font-medium text-gray-500">Booking Number</p>
                               <p>{bolDoc.bolData?.bookingNumber || 'N/A'}</p>
                             </div>
+                            <div>
+                              <p className="text-sm font-medium text-gray-500">Carrier's Reference</p>
+                              <p>{bolDoc.bolData?.carrierReference || 'N/A'}</p>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                             <div>
                               <p className="text-sm font-medium text-gray-500">Total Weight</p>
                               <p>

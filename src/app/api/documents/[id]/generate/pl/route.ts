@@ -17,9 +17,18 @@ interface GenerateRequest {
 function extractProductName(description: string): string {
   if (!description) return '';
   
-  // Remove packaging info patterns like "1 FLEXI TANK" or "10 IBC"
-  return description.replace(/^\d+\s+(?:FLEXI\s+TANK|FLEXITANK|FLEXI-TANK|IBC|DRUM|DRUMS|CONTAINER|BULK|TOTE)s?\s+/i, '')
+  // More aggressively remove packaging info patterns
+  const cleanedDesc = description
+    // Remove quantity + packaging type patterns like "1 FLEXI TANK" or "10 IBC"
+    .replace(/^\d+\s+(?:FLEXI\s+TANK|FLEXITANK|FLEXI-TANK|IBC|DRUM|DRUMS|CONTAINER|BULK|TOTE)s?\s+/i, '')
+    // Remove standalone packaging type patterns
+    .replace(/^FLEXI\s+TANK\s+|FLEXITANK\s+|FLEXI-TANK\s+|IBC\s+|DRUM\s+|DRUMS\s+|CONTAINER\s+|BULK\s+|TOTE\s+/i, '')
+    // Strip any remaining numeric prefixes that might be part of packaging
+    .replace(/^\d+\s+/, '')
     .trim();
+  
+  console.log(`PL extractProductName transform: "${description}" -> "${cleanedDesc}"`);
+  return cleanedDesc;
 }
 
 // Helper to extract packaging type from description

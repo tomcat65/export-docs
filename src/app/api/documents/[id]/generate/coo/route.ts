@@ -5,24 +5,36 @@ import { Document } from '@/models/Document'
 import { Client } from '@/models/Client'
 import { Asset } from '@/models/Asset'
 import { PDFDocument, rgb, StandardFonts, PDFPage, PDFImage, PDFFont } from 'pdf-lib'
-import mongoose from 'mongoose'
+import mongoose, { Types } from 'mongoose'
 import fs from 'fs'
 import path from 'path'
-import { Types } from 'mongoose'
 import { GridFSBucket } from 'mongodb'
+import { Readable } from 'stream'
 
 // Helper function to extract product name from description
 function extractProductName(description: string): string {
   if (!description) return '';
   
-  // Remove packaging info patterns like "1 FLEXI TANK" or "10 IBC"
-  return description.replace(/^\d+\s+(?:FLEXI\s+TANK|FLEXITANK|FLEXI-TANK|IBC|DRUM|DRUMS|CONTAINER|BULK|TOTE)s?\s+/i, '')
+  // Even more aggressively remove packaging info patterns
+  const cleanedDesc = description
+    // First remove common quantity + packaging patterns
+    .replace(/^\d+\s+(?:FLEXI\s+TANK|FLEXITANK|FLEXI-TANK|IBC|DRUM|DRUMS|CONTAINER|BULK|TOTE)s?\s+/i, '')
+    // Then remove standalone packaging words (without quantities)
+    .replace(/^(?:FLEXI\s+TANK|FLEXITANK|FLEXI-TANK|IBC|DRUM|DRUMS|CONTAINER|BULK|TOTE)s?\s+/i, '')
+    // Strip any remaining numeric prefixes that might be part of packaging (e.g. "1 Base Oil")
+    .replace(/^\d+\s+/, '')
+    // Remove any "X" that might appear at the beginning (sometimes used as a count)
+    .replace(/^X\s+/i, '')
     .trim();
+  
+  console.log(`COO extractProductName transform: "${description}" -> "${cleanedDesc}"`);
+  return cleanedDesc;
 }
 
 interface GenerateRequest {
   mode?: 'overwrite' | 'new'
   customDate?: string // Allow custom date to be provided
+  showSection?: 'header' | 'body' | 'footer' | null
 }
 
 // Define types for function parameters
@@ -97,7 +109,10 @@ function drawDocumentHeader(
     address: string[];
     taxId: string;
   }
-) {
+): number {
+  // DEBUG - Log the date being used in the header
+  console.log("🔍 HEADER FUNCTION date parameter:", date);
+  
   const { width, height } = page.getSize();
   
   // Logo section - adjust size to 80% of the current size
@@ -119,13 +134,10 @@ function drawDocumentHeader(
   }
   
   // Date - format to match the sample (November 01, 2024)
-  const dateObj = new Date();
-  const month = dateObj.toLocaleString('en-US', { month: 'long' });
-  const day = dateObj.getDate().toString().padStart(2, '0');
-  const year = dateObj.getFullYear();
-  const formattedDate = `${month} ${day}, ${year}`;
+  console.log("🔴 CRITICAL FIX - Using provided date:", date);
   
-  page.drawText(formattedDate, {
+  // The date parameter is already formatted, display it directly
+  page.drawText(date, {
     x: 50,
     y: height - 115,
     size: 10,
@@ -357,9 +369,11 @@ function drawDocumentBody(
   console.log("Raw product name before formatting:", productNameTrimmed);
   
   // Check if the product name still contains packaging info and remove it
+  // Here we guarantee that no packaging info remains in the product name
   const cleanedProductName = extractProductName(productNameTrimmed);
   console.log("Product name after removing packaging:", cleanedProductName);
   
+  // Ensure all packaging references are removed before formatting
   const formattedProductName = cleanedProductName
     ? cleanedProductName
         .replace(/base oil group ii/i, 'Base Oil Group II,')
@@ -368,7 +382,7 @@ function drawDocumentBody(
         .toUpperCase()
     : "[NO PRODUCT NAME FOUND]"; // Default text if no product name is available
   
-  console.log("Formatted product name:", formattedProductName);
+  console.log("Formatted product name for document:", formattedProductName);
   
   page.drawText(formattedProductName, {
     x: margin + 130,
@@ -567,11 +581,24 @@ function drawDocumentFooter(
   data: NotaryFooterData,
   userName: string
 ) {
-  const { width, height } = page.getSize();
-  const lineHeight = 14;
+  const { width } = page.getSize();
+  const margin = 50; // Set margin to match other sections
+  let currentY = yStart; // Start from the yStart position
+  const lineHeight = 14; // Define lineHeight constant to match other sections
+  
+  // Helper function for ordinal suffixes
+  const getOrdinalSuffix = (n: number): string => {
+    if (n > 3 && n < 21) return 'th';
+    switch (n % 10) {
+      case 1: return 'st';
+      case 2: return 'nd';
+      case 3: return 'rd';
+      default: return 'th';
+    }
+  };
   
   // Start the footer section - position properly
-  let footerCurrentY = yStart + 40;
+  let footerCurrentY = 115;
   
   // City, County, State on a single line at the bottom of the page
   page.drawText("CITY: Houston", {
@@ -596,7 +623,7 @@ function drawDocumentFooter(
   });
   
   // Add proper spacing below the City/County/State line
-  const notaryY = footerCurrentY + lineHeight ;
+  const notaryY = footerCurrentY + 14; // Use fixed value of 14 for lineHeight
   
   // Draw notary seal on the left side
   if (data.notarySealImage) {
@@ -604,7 +631,7 @@ function drawDocumentFooter(
     const sealHeight = 46;
     
     page.drawImage(data.notarySealImage, {
-      x: 350,
+      x: Math.floor(Math.random() * (350 - 325 + 1)) + 325,
       y: 20,
       width: sealWidth,
       height: sealHeight
@@ -613,27 +640,26 @@ function drawDocumentFooter(
   
   // Draw notary signature on the right side
   if (data.notarySignatureImage) {
-    const signatureWidth = 130;
-    const signatureHeight = 45;
+    const notarySignatureWidth = 130;
+    const notarySignatureHeight = 45;
     
-    // Position signature at the right side
     page.drawImage(data.notarySignatureImage, {
       x: 450,
-      y: 35,
-      width: signatureWidth,
-      height: signatureHeight
+      y: Math.floor(Math.random() * (35 - 25 + 1)) + 25,
+      width: notarySignatureWidth,
+      height: notarySignatureHeight
     });
-    
-
+  } else {
+    // If no signature image, just write the name
+    page.drawText('Notary Signature', {
+      x: 450,
+      y: 35,
+      size: 10,
+      font: fonts.regular
+    });
   }
   
-  // Position notary text in the middle, between seal and signature
-  const centerX = 200;
-  const textY = notaryY - 50; // Position text lower, at a better vertical position
-  
-  // Draw notary text on the left side of the signature
-  // Add a line with the authenticated user's name right before the "personally appeared" text
-  
+   
 
   // Notary text to be positioned in the middle section  
   page.drawText("On this", {
@@ -643,27 +669,24 @@ function drawDocumentFooter(
     font: fonts.regular
   });
   
-  // Date formatting
-  const dateObj = new Date();
-  const day = dateObj.getDate();
-  const getOrdinalSuffix = (n: number): string => {
-    if (n > 3 && n < 21) return 'th';
-    switch (n % 10) {
-      case 1: return 'st';
-      case 2: return 'nd';
-      case 3: return 'rd';
-      default: return 'th';
-    }
-  };
-  const month = dateObj.toLocaleString('en-US', { month: 'long' });
-  const year = dateObj.getFullYear();
+  // Notary date and seal section
   
+  
+  // CRITICAL FIX: Use the notaryDate from data parameter instead of a new Date()
+  console.log("🔴 NOTARY SECTION - Using provided date:", data.notaryDate);
+  
+  // Extract the date components from the provided notaryDate
+  const day = parseInt(data.notaryDate.day.match(/\d+/)?.[0] || "1", 10);
+  const month = data.notaryDate.month;
+  const year = data.notaryDate.year;
+  
+  // Text for the notary date line with the correct spacing
   page.drawText(`${day}${getOrdinalSuffix(day)}    day of    ${month}, ${year},`, {
     x: 100,
     y: 95,
     size: 10,
     font: fonts.regular
-  });
+  })
   
   page.drawText("personally appeared before me,", {
     x: 290,
@@ -728,7 +751,7 @@ function drawDocumentFooter(
   return notaryY + 20; // Return proper position for the end of the document
 }
 
-async function loadAssetImage(bucket: any, filename: string): Promise<Buffer | null> {
+async function loadAssetImage(bucket: mongoose.mongo.GridFSBucket, filename: string): Promise<Buffer | null> {
   try {
     // Find the file by filename
     const file = await bucket.find({ filename }).next();
@@ -790,10 +813,50 @@ export async function POST(
     }
 
     // Find document and related client
-    const bolDocument = await Document.findById(id)
+    let bolDocument = await Document.findById(id)
+      .populate('bolData') // Ensure we fully populate the BOL data
+    
     if (!bolDocument || bolDocument.type !== 'BOL') {
       return NextResponse.json({ error: 'BOL document not found' }, { status: 404 })
     }
+
+    // Try to get the BOL date directly from the document, then from bolData relationship,
+    // and finally try a direct query as a last resort
+    let dateOfIssue = bolDocument.dateOfIssue || (bolDocument.bolData && bolDocument.bolData.dateOfIssue);
+    
+    // If we still don't have a date, try to look it up separately
+    if (!dateOfIssue && bolDocument.bolData && bolDocument.bolData.bolNumber) {
+      try {
+        // Get BolData model
+        const BolData = mongoose.models.BolData || mongoose.model('BolData', new mongoose.Schema({}));
+        
+        // Query for the latest BOL data with this number
+        const latestBolData = await BolData.findOne({ 
+          bolNumber: bolDocument.bolData.bolNumber 
+        });
+        
+        if (latestBolData && latestBolData.dateOfIssue) {
+          dateOfIssue = latestBolData.dateOfIssue;
+          console.log("Found BOL date from separate query:", dateOfIssue);
+          
+          // Update the document in memory for consistency
+          if (bolDocument.bolData) {
+            bolDocument.bolData.dateOfIssue = dateOfIssue;
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching latest BOL data:", error);
+      }
+    }
+
+    // Log the BOL document details for debugging
+    console.log('Found BOL document:', {
+      id: bolDocument._id,
+      hasDateOfIssue: !!(bolDocument.bolData && bolDocument.bolData.dateOfIssue),
+      dateOfIssue: (bolDocument.bolData && bolDocument.bolData.dateOfIssue) || 'NOT SET',
+      bolNumber: (bolDocument.bolData && bolDocument.bolData.bolNumber) || 'NOT SET',
+      manuallyFoundDate: dateOfIssue || 'NONE'
+    });
 
     const client = await Client.findById(bolDocument.clientId)
     if (!client) {
@@ -847,78 +910,145 @@ export async function POST(
       bold: helveticaBold
     }
 
-    // Date handling logic - correctly parse from BOL data
-    let businessDateObj = new Date()
+    // Debug logging for enhanced clarity
+    console.log("==================== COO DATE DIAGNOSTIC ====================");
+    console.log("RAW bolDocument:", {
+      hasDateOfIssue: !!bolDocument.dateOfIssue,
+      dateOfIssue: bolDocument.dateOfIssue || "NOT SET",
+      hasBolData: !!bolDocument.bolData,
+      bolDataDateOfIssue: bolDocument.bolData?.dateOfIssue || "NOT SET",
+      bolNumber: bolDocument.bolData?.bolNumber || "NOT SET"
+    });
     
-    // First, try to get date from BOL's dateOfIssue
-    if (bolDocument.bolData?.dateOfIssue) {
-      console.log("Using BOL dateOfIssue:", bolDocument.bolData.dateOfIssue);
-      try {
-        // Handle different date formats: MM/DD/YYYY or YYYY-MM-DD
-        if (bolDocument.bolData.dateOfIssue.includes('/')) {
-          const [month, day, year] = bolDocument.bolData.dateOfIssue.split('/').map((num: string) => parseInt(num, 10));
-          console.log("Parsed date components:", { month, day, year });
-          
-          // Ensure proper year format (handle 2-digit years)
-          const fullYear = year < 100 ? (year < 50 ? 2000 + year : 1900 + year) : year;
-          businessDateObj = new Date(fullYear, month - 1, day);
-          
-          console.log("Converted date object:", {
-            date: businessDateObj.toISOString(),
-            year: businessDateObj.getFullYear(),
-            month: businessDateObj.getMonth() + 1,
-            day: businessDateObj.getDate()
-          });
-        } else if (bolDocument.bolData.dateOfIssue.includes('-')) {
-          businessDateObj = new Date(bolDocument.bolData.dateOfIssue);
-          console.log("Parsed ISO date:", businessDateObj.toISOString());
-        }
-      } catch (error) {
-        console.error("Error parsing BOL date:", error);
-      }
-    } 
-    // If no BOL date or parsing failed, try customDate
-    else if (customDate) {
-      console.log("Using custom date:", customDate);
-      try {
+    // IMPORTANT: USE DIRECT DATE APPROACH LIKE THE PACKING LIST
+    // Instead of using any complex logic that might be failing,
+    // use the exact same approach that works in the packing list:
+    // Simple direct reference to bolDocument.bolData.dateOfIssue
+    
+    let businessDateObj: Date;
+    let dateSource: string;
+    
+    try {
+      if (bolDocument.bolData?.dateOfIssue) {
+        businessDateObj = new Date(bolDocument.bolData.dateOfIssue);
+        dateSource = "BOL.bolData.dateOfIssue";
+        console.log("👉 DIRECT ACCESS: Using bolDocument.bolData.dateOfIssue:", 
+          bolDocument.bolData.dateOfIssue,
+          "→", businessDateObj.toISOString());
+      } else if (customDate) {
         businessDateObj = new Date(customDate);
-        console.log("Parsed custom date:", businessDateObj.toISOString());
-      } catch (error) {
-        console.error("Error parsing custom date:", error);
-      }
-    } 
-    // Fallback to current date
-    else {
-      console.log("Using current date as fallback:", new Date().toISOString());
-    }
-
-    // Properly format the date for display
-    const formatDateFormal = (date: Date): string => {
-      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-      const dayOfWeek = days[date.getDay()]
-      const day = date.getDate()
-      const month = date.toLocaleString('default', { month: 'long' })
-      const year = date.getFullYear()
-      
-      const getOrdinalSuffix = (n: number): string => {
-        if (n > 3 && n < 21) return 'th'
-        switch (n % 10) {
-          case 1: return 'st'
-          case 2: return 'nd'
-          case 3: return 'rd'
-          default: return 'th'
+        dateSource = "Custom date";
+        console.log("Using custom date:", customDate);
+      } else {
+        // CRITICAL! Force use of BOL's date, even if null to ensure we're not using today by default
+        console.log("⚠️ WARNING: No BOL date found, checking for backups...");
+        
+        // Additional fallback to other sources in bolDocument
+        if (bolDocument.dateOfIssue) {
+          businessDateObj = new Date(bolDocument.dateOfIssue);
+          dateSource = "bolDocument.dateOfIssue (fallback)";
+          console.log("Using fallback date from bolDocument.dateOfIssue:", bolDocument.dateOfIssue);
+        } else {
+          // Only use today's date if absolutely necessary
+          console.log("❌ CRITICAL: No date available from BOL, using today's date as a last resort");
+          businessDateObj = new Date();
+          dateSource = "Current date (no BOL date)";
         }
       }
+      
+      // Validate the date is valid
+      if (isNaN(businessDateObj.getTime())) {
+        console.warn("Invalid date detected, resetting to current date");
+        businessDateObj = new Date();
+        dateSource = "Current date (invalid date)";
+      }
+    } catch (error) {
+      // If any date parsing fails, use current date as fallback
+      console.error("Date parsing error:", error);
+      businessDateObj = new Date();
+      dateSource = "Current date (parsing error)";
+    }
+    
+    console.log("Date to be used for COO:", {
+      source: dateSource,
+      dateString: businessDateObj.toString(),
+      isoString: businessDateObj.toISOString(),
+      year: businessDateObj.getFullYear(),
+      month: businessDateObj.getMonth() + 1,
+      day: businessDateObj.getDate()
+    });
 
-      return `${dayOfWeek}, ${day}${getOrdinalSuffix(day)} day of ${month}, ${year}`
+    // Debug: Compare current date with the BOL date
+    const now = new Date();
+    console.log("Current date comparison:", {
+      now: now.toISOString(),
+      bolDate: businessDateObj.toISOString(),
+      isPastDate: businessDateObj < now ? "yes - BOL date is in the past" : "no - BOL date is not in the past",
+      daysDifference: Math.floor((businessDateObj.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+    });
+
+    // Get the next business day (excluding weekends)
+    const getNextBusinessDay = (date: Date): Date => {
+      // Force a copy to ensure we don't modify the original date
+      console.log("🔄 getNextBusinessDay input date:", date.toISOString(), "source:", dateSource);
+      
+      // We intentionally use the BOL date even if it's in the future
+      // This ensures consistent behavior for all documents
+      const result = new Date(date.getTime()); // Create a proper copy
+      result.setDate(result.getDate() + 1);
+      
+      // If it's a weekend (0 = Sunday, 6 = Saturday), adjust to the next business day
+      if (result.getDay() === 0) { // Sunday
+        result.setDate(result.getDate() + 1); // Move to Monday
+      } else if (result.getDay() === 6) { // Saturday
+        result.setDate(result.getDate() + 2); // Move to Monday
+      }
+      
+      console.log("✅ getNextBusinessDay output date:", result.toISOString());
+      return result;
+    };
+    
+    // Update businessDateObj to the next business day
+    businessDateObj = getNextBusinessDay(businessDateObj);
+    console.log("Next business day:", {
+      date: businessDateObj.toISOString(),
+      year: businessDateObj.getFullYear(),
+      month: businessDateObj.getMonth() + 1, 
+      day: businessDateObj.getDate(),
+      weekday: businessDateObj.getDay(),
+      source: dateSource,
+      isFutureDate: businessDateObj > now ? "yes" : "no"
+    });
+
+    const formatDateFormal = (date: Date): string => {
+      console.log("📅 formatDateFormal input date:", date.toISOString(), "source:", dateSource);
+      
+      const day = date.getDate();
+      const month = date.toLocaleString('default', { month: 'long' });
+      const year = date.getFullYear();
+      // Day of week is no longer needed
+      // const dayOfWeek = date.toLocaleString('default', { weekday: 'long' });
+
+      const getOrdinalSuffix = (n: number): string => {
+        if (n > 3 && n < 21) return 'th';
+        switch (n % 10) {
+          case 1: return 'st';
+          case 2: return 'nd';
+          case 3: return 'rd';
+          default: return 'th';
+        }
+      };
+
+      // New format: "Month, Day Year" (e.g., "December, 26th 2025")
+      const formatted = `${month}, ${day}${getOrdinalSuffix(day)} ${year}`;
+      console.log("🔤 formatDateFormal result:", formatted);
+      return formatted;
     };
 
+    // Store the formatted date for consistent use throughout the document
     const formattedBusinessDay = formatDateFormal(businessDateObj);
-    const businessDayName = businessDateObj.toLocaleString('en-US', { weekday: 'long' });
-    const businessMonth = businessDateObj.toLocaleString('en-US', { month: 'long' });
-    const businessDay = businessDateObj.getDate();
-    const businessYear = businessDateObj.getFullYear();
-
+    console.log("📝 FINAL DATE TO BE USED IN COO:", formattedBusinessDay);
+    
     // Load logo
     let logoPath;
     try {
@@ -1135,7 +1265,9 @@ export async function POST(
         
         // First try to use the dedicated product field
         if (item.product && typeof item.product === 'string' && item.product.trim() !== '') {
-          uniqueProducts.add(item.product.trim());
+          // Clean up the product field before adding to the set
+          const cleanedProduct = extractProductName(item.product.trim());
+          uniqueProducts.add(cleanedProduct);
         } 
         // If product field doesn't exist or is empty, extract product from description
         else if (item.description && typeof item.description === 'string' && item.description.trim() !== '') {
@@ -1159,7 +1291,8 @@ export async function POST(
       switch (showSection) {
         case 'header':
           // Draw only the header section
-          drawDocumentHeader(
+          console.log("🛑 BEFORE DRAWING DOCUMENT HEADER, date to use:", formattedBusinessDay, "source:", dateSource);
+          const headerY = drawDocumentHeader(
             page,
             pdfDoc,
             fonts,
@@ -1171,6 +1304,7 @@ export async function POST(
               taxId: client.rif || ''
             }
           );
+          console.log("✅ AFTER DRAWING DOCUMENT HEADER");
           break;
           
         case 'body':
@@ -1188,14 +1322,15 @@ export async function POST(
               vesselName: bolDocument.bolData?.vessel || '',
               voyageNumber: bolDocument.bolData?.voyage || '',
               containers,
-              productName: uniqueProducts.size > 0 ? Array.from(uniqueProducts)[0] : '',
+              productName: uniqueProducts.size > 0 ? extractProductName(Array.from(uniqueProducts)[0]) : '',
               portOfLoading: bolDocument.bolData?.portOfLoading || '',
               portOfDischarge: bolDocument.bolData?.portOfDischarge || ''
             }
           );
           
           // Log the product name being used
-          console.log("Product name used for section 'body':", uniqueProducts.size > 0 ? Array.from(uniqueProducts)[0] : '[EMPTY]');
+          const cleanedBodyProductName = uniqueProducts.size > 0 ? extractProductName(Array.from(uniqueProducts)[0]) : '';
+          console.log("Product name used for section 'body':", cleanedBodyProductName || '[EMPTY]');
           break;
           
         case 'footer':
@@ -1219,7 +1354,12 @@ export async function POST(
     } else {
       // Draw the complete document with all sections
       
+      // Get a cleaned product name for use throughout the document
+      const cleanedDocProductName = uniqueProducts.size > 0 ? extractProductName(Array.from(uniqueProducts)[0]) : '';
+      console.log("Cleaned product name for full document:", cleanedDocProductName);
+      
       // Draw header
+      console.log("🛑 BEFORE DRAWING DOCUMENT HEADER, date to use:", formattedBusinessDay, "source:", dateSource);
       const headerY = drawDocumentHeader(
         page,
         pdfDoc,
@@ -1232,6 +1372,7 @@ export async function POST(
           taxId: client.rif || ''
         }
       );
+      console.log("✅ AFTER DRAWING DOCUMENT HEADER");
       
       // Draw body
       const bodyY = drawDocumentBody(
@@ -1247,15 +1388,16 @@ export async function POST(
           vesselName: bolDocument.bolData?.vessel || '',
           voyageNumber: bolDocument.bolData?.voyage || '',
           containers,
-          productName: uniqueProducts.size > 0 ? Array.from(uniqueProducts)[0] : '',
+          productName: cleanedDocProductName,
           portOfLoading: bolDocument.bolData?.portOfLoading || '',
           portOfDischarge: bolDocument.bolData?.portOfDischarge || ''
         }
       );
       
       // Log the product name being used in the complete document
-      const selectedProductName = uniqueProducts.size > 0 ? Array.from(uniqueProducts)[0] : '';
-      console.log("Product name used in complete document:", selectedProductName || '[EMPTY]');
+      const selectedProductName = cleanedDocProductName;
+      const finalProductName = extractProductName(selectedProductName); // Extra cleanup to be sure
+      console.log("Product name used in complete document:", finalProductName || '[EMPTY]');
       
       // Draw signature section
       const signatureY = drawSignatureSection(
@@ -1288,7 +1430,7 @@ export async function POST(
             state: 'Texas',
           },
           notaryDate: {
-            day: formattedBusinessDay,
+            day: businessDateObj.getDate().toString(),
             month: businessDateObj.toLocaleString('default', { month: 'long' }),
             year: businessDateObj.getFullYear().toString()
           },
@@ -1310,45 +1452,111 @@ export async function POST(
       bucketName: 'documents'
     })
 
-    // Generate filename with BOL number
-    const fileName = `${bolDocument.bolData?.bolNumber || client.name.replace(/\s+/g, '_')}-COO.pdf`
+    // Generate filename with BOL number - updated format
+    const bolNumber = bolDocument.bolData?.bolNumber || 'UNKNOWN_BOL';
+    const fileName = `COO_${bolNumber}.pdf`;
+    console.log(`Using filename: ${fileName}`);
 
     // Upload the file to GridFS
     const uploadStream = bucket.openUploadStream(fileName, {
       contentType: 'application/pdf',
       metadata: {
-        bolId: bolDocument._id
+        bolId: bolDocument._id,
+        clientId: client._id,
+        contentType: 'application/pdf',
+        uploadedBy: session.user?.email,
+        uploadedAt: new Date().toISOString(),
+        fileName: fileName
       }
+    })
+
+    console.log('Starting GridFS upload for file:', {
+      fileName,
+      streamId: uploadStream.id,
+      metadata: uploadStream.options.metadata
     })
 
     // Convert Uint8Array to Buffer and upload
     const buffer = Buffer.from(pdfBytes)
-    await new Promise((resolve, reject) => {
-      const readStream = require('stream').Readable.from(buffer)
-      readStream
-        .pipe(uploadStream)
-        .on('error', reject)
-        .on('finish', resolve)
-    })
+    try {
+      await new Promise((resolve, reject) => {
+        const readStream = Readable.from(buffer)
+        
+        // Add error handling for the read stream
+        readStream.on('error', (error: Error) => {
+          console.error('Error in read stream:', error)
+          reject(error)
+        })
+        
+        // Add error and finish handlers for the upload stream
+        uploadStream.on('error', (error: Error) => {
+          console.error('Error in GridFS upload stream:', error)
+          reject(error)
+        })
+        
+        uploadStream.on('finish', () => {
+          console.log('GridFS upload completed successfully:', {
+            fileId: uploadStream.id,
+            fileName,
+            length: buffer.length
+          })
+          resolve(uploadStream.id)
+        })
+        
+        readStream.pipe(uploadStream)
+      })
 
-    // Create a new document record
-    const newDocument = await Document.create({
-      clientId: client._id,
-      fileName,
-      fileId: uploadStream.id,
-      type: 'COO',
-      relatedBolId: bolDocument._id,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    })
-
-    return NextResponse.json({
-      document: {
-        _id: newDocument._id,
-        fileName: newDocument.fileName,
-        type: newDocument.type
+      // Verify the file was uploaded
+      const uploadedFile = await bucket.find({ _id: uploadStream.id }).next()
+      if (!uploadedFile) {
+        throw new Error('File not found in GridFS after upload')
       }
-    })
+      
+      console.log('Verified file in GridFS:', {
+        fileId: uploadedFile._id,
+        fileName: uploadedFile.filename,
+        length: uploadedFile.length
+      })
+
+      // Create a new document record
+      const newDocument = await Document.create({
+        clientId: client._id,
+        fileName,
+        fileId: uploadStream.id,
+        type: 'COO',
+        relatedBolId: bolDocument._id,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      })
+
+      // Debug the notary date that will appear in the document
+      console.log("📌 NOTARY DATE IN DOCUMENT:", {
+        day: businessDateObj.getDate().toString(),
+        month: businessDateObj.toLocaleString('default', { month: 'long' }),
+        year: businessDateObj.getFullYear().toString(),
+        originalDate: bolDocument.bolData?.dateOfIssue || "[NO BOL DATE]"
+      });
+
+      return NextResponse.json({
+        document: {
+          _id: newDocument._id,
+          fileName: newDocument.fileName,
+          type: newDocument.type
+        }
+      })
+    } catch (error) {
+      console.error('Error during file upload process:', error)
+      
+      // Try to clean up any partial uploads
+      try {
+        await bucket.delete(uploadStream.id)
+        console.log('Cleaned up partial upload:', uploadStream.id)
+      } catch (cleanupError) {
+        console.error('Error cleaning up partial upload:', cleanupError)
+      }
+      
+      throw error // Re-throw to be caught by the outer try-catch
+    }
   } catch (error) {
     console.error('Error generating Certificate of Origin:', error)
     return NextResponse.json(

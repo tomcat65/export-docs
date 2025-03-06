@@ -26,6 +26,7 @@ interface ProcessedDocument {
   shipmentDetails: {
     bolNumber: string
     bookingNumber: string
+    carrierReference: string
     vesselName: string
     voyageNumber: string
     portOfLoading: string
@@ -153,6 +154,7 @@ CRITICAL RULES:
 - IMPORTANT: Read and analyze ALL PAGES of the document thoroughly
 - Extract ALL information EXACTLY as shown in the document
 - For the BOL number, use ONLY the number shown in "B/L No." field
+- For the carrier's reference use the number shown in the "Carrier's Reference" field
 - Convert measurements to all requested units
 - Create separate entries for each container/item
 - Use empty string "" for missing text fields
@@ -183,6 +185,7 @@ Return this EXACT JSON structure with the values found:
   "shipmentDetails": {
     "bolNumber": "",        // From "B/L No." field in header
     "bookingNumber": "",    // From booking reference if available
+    "carrierReference": "", // From Carrier's Reference" field
     "vesselName": "",       // Vessel name only
     "voyageNumber": "",     // Voyage number if available
     "portOfLoading": "",    // Port of loading

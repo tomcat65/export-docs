@@ -21,6 +21,7 @@ interface SerializedDocument {
     bolNumber: string
     bookingNumber?: string
     shipper?: string
+    carrierReference?: string
     vessel?: string
     voyage?: string
     portOfLoading?: string

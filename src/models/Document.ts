@@ -58,6 +58,7 @@ export interface IDocument {
     bolNumber: string
     bookingNumber?: string
     shipper: string
+    carrierReference?: string
     vessel?: string
     voyage?: string  // Adding voyage number field
     portOfLoading: string
