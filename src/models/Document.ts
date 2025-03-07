@@ -60,7 +60,7 @@ export interface IDocument {
     shipper: string
     carrierReference?: string
     vessel?: string
-    voyage?: string  // Adding voyage number field
+    voyage?: string
     portOfLoading: string
     portOfDischarge: string
     dateOfIssue?: string
@@ -150,8 +150,9 @@ const documentSchema = new mongoose.Schema<IDocument>({
     bolNumber: String,
     bookingNumber: String,
     shipper: String,
+    carrierReference: String,
     vessel: String,
-    voyage: String,  // Adding voyage number field to schema
+    voyage: String,
     portOfLoading: String,
     portOfDischarge: String,
     dateOfIssue: String,

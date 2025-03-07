@@ -71,6 +71,9 @@ export function ClientDocumentsWrapper({
 }) {
   const router = useRouter()
   const [client, setClient] = useState<SerializedClient>(initialClient)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [documents, setDocuments] = useState<SerializedDocument[]>([])
   
   // Convert serialized documents to proper format
   const convertToDocumentFormat = (docs: SerializedDocument[]) => {
@@ -89,34 +92,63 @@ export function ClientDocumentsWrapper({
   // Function to refresh documents without a full page refresh
   const refreshDocuments = useCallback(async () => {
     try {
+      setLoading(true);
       // Set a flag in sessionStorage to indicate that we're refreshing
       // and the DocumentList component should preserve its expanded state
-      sessionStorage.setItem('preserveDocumentListState', 'true')
+      sessionStorage.setItem('preserveDocumentListState', 'true');
       
-      // Save the current expanded states from sessionStorage if they exist
-      const expandedCards = sessionStorage.getItem('expandedCards')
-      const expandedShipmentDetails = sessionStorage.getItem('expandedShipmentDetails')
-      
-      // Use router.refresh() to get fresh data from the server
-      router.refresh()
-      
-      // After refresh, ensure the expanded states are preserved
-      if (expandedCards) {
-        sessionStorage.setItem('expandedCards', expandedCards)
+      // Add a cache-busting parameter to ensure fresh data
+      const timestamp = new Date().getTime();
+      const response = await fetch(`/api/clients/${client.id}/documents?t=${timestamp}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch documents');
       }
       
-      if (expandedShipmentDetails) {
-        sessionStorage.setItem('expandedShipmentDetails', expandedShipmentDetails)
+      const data = await response.json();
+      setDocuments(data.documents || []);
+      
+      console.log('Documents refreshed, count:', data.documents?.length);
+      // Log the first document's carrier reference to verify it's coming through
+      if (data.documents?.[0]?.bolData) {
+        console.log('First document carrier reference:', 
+          data.documents[0].bolData.carrierReference || 'NOT FOUND');
       }
     } catch (error) {
-      console.error('Error refreshing documents:', error)
+      console.error('Error refreshing documents:', error);
+      setError('Failed to refresh documents');
+    } finally {
+      setLoading(false);
     }
-  }, [router])
+  }, [client.id]);
   
   // When the component mounts or initialClient changes, update the state
   useEffect(() => {
     setClient(initialClient)
   }, [initialClient])
+
+  // Fetch documents when the component mounts
+  useEffect(() => {
+    const fetchDocuments = async () => {
+      setLoading(true)
+      try {
+        // Add a cache-busting parameter to ensure fresh data
+        const timestamp = new Date().getTime();
+        const response = await fetch(`/api/clients/${client.id}/documents?t=${timestamp}`)
+        if (!response.ok) {
+          throw new Error('Failed to fetch documents')
+        }
+        const data = await response.json()
+        setDocuments(data.documents || [])
+      } catch (error) {
+        console.error('Error fetching documents:', error)
+        setError('Failed to load documents')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchDocuments()
+  }, [client.id])
   
   return (
     <div className='space-y-6'>
@@ -138,7 +170,7 @@ export function ClientDocumentsWrapper({
 
       <DocumentList 
         clientId={client.id} 
-        documents={convertToDocumentFormat(client.documents) as any}
+        documents={convertToDocumentFormat(documents) as any}
         onDocumentDeleted={refreshDocuments}
       />
     </div>

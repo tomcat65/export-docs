@@ -26,7 +26,7 @@ interface ShipmentDetails {
   dateOfIssue: string;
   shipmentDate: string;
   totalContainers?: string;
-  carriersReference?: string; // Added the carriersReference field
+  carrierReference?: string; // Fixed the field name to match the rest of the application
 }
 
 interface ProcessedDocument {
@@ -254,10 +254,20 @@ export async function POST(request: NextRequest) {
     console.log(JSON.stringify(claudeData, null, 2));
     console.log('------------------------------------------');
 
+    // Fix any naming inconsistencies with carrier reference
+    // @ts-ignore - Check for misnamed field
+    if (claudeData.shipmentDetails.carriersReference !== undefined && claudeData.shipmentDetails.carrierReference === undefined) {
+      // @ts-ignore - Access misnamed field
+      claudeData.shipmentDetails.carrierReference = claudeData.shipmentDetails.carriersReference;
+      // @ts-ignore - Delete misnamed field
+      delete claudeData.shipmentDetails.carriersReference;
+      console.log('Fixed carrier reference field name in upload route');
+    }
+
     // Log Claude's response for debugging
     console.log('Claude extracted data:', {
       bolNumber: claudeData.shipmentDetails.bolNumber,
-      carriersReference: claudeData.shipmentDetails.carriersReference,
+      carrierReference: claudeData.shipmentDetails.carrierReference, // Fixed the field name
       consignee: claudeData.parties.consignee,
       shipper: claudeData.parties.shipper
     });

@@ -151,31 +151,84 @@ async function cleanupOldFiles(bucket: any, fileName: string, bolNumber?: string
     const cursor = bucket.find({
       $or: [
         { filename: fileName },
-        { 'metadata.bolNumber': bolNumber }
+        // Only include BOL number if it's provided
+        ...(bolNumber ? [{ 'metadata.bolNumber': bolNumber }] : [])
       ]
-    })
+    });
     
-    const files = await cursor.toArray()
-    console.log(`Found ${files.length} files to clean up`)
+    const files = await cursor.toArray();
+    
+    if (files.length <= 1) {
+      // No duplicates to clean up
+      return;
+    }
+    
+    console.log(`Found ${files.length} potentially duplicate files`);
+    
+    // Get a list of all file IDs currently referenced by documents in the database
+    const db = mongoose.connection.db;
+    if (!db) {
+      console.error('Database connection not established, skipping file reference check');
+      return;
+    }
+    
+    const documentsCollection = db.collection('documents');
+    
+    // Find all documents that reference any of these files
+    const fileIds = files.map((file: any) => file._id);
+    const referencingDocuments = await documentsCollection.find({ 
+      fileId: { $in: fileIds } 
+    }).toArray();
+    
+    // Create a map of fileId -> documentIds that reference it
+    const fileReferences = new Map();
+    referencingDocuments.forEach((doc: any) => {
+      const fileId = doc.fileId.toString();
+      if (!fileReferences.has(fileId)) {
+        fileReferences.set(fileId, []);
+      }
+      fileReferences.get(fileId).push(doc._id.toString());
+    });
+    
+    console.log(`Found ${referencingDocuments.length} documents referencing these files`);
     
     // Sort files by uploadedAt to keep the most recent
     files.sort((a: { metadata?: { uploadedAt?: Date } }, b: { metadata?: { uploadedAt?: Date } }) => {
-      const dateA = new Date(a.metadata?.uploadedAt || 0)
-      const dateB = new Date(b.metadata?.uploadedAt || 0)
-      return dateB.getTime() - dateA.getTime()
-    })
+      const dateA = new Date(a.metadata?.uploadedAt || 0);
+      const dateB = new Date(b.metadata?.uploadedAt || 0);
+      return dateB.getTime() - dateA.getTime();
+    });
     
-    // Keep the most recent file, delete the rest
+    // Keep track of the most recent file (we'll always keep this one)
+    const mostRecentFile = files[0];
+    
+    // For each file (except the most recent), check if it's referenced and decide whether to delete
+    let deletedCount = 0;
     for (let i = 1; i < files.length; i++) {
-      try {
-        await bucket.delete(files[i]._id)
-        console.log(`Deleted duplicate file: ${files[i]._id}, uploaded at ${files[i].metadata?.uploadedAt}`)
-      } catch (error) {
-        console.error(`Failed to delete file ${files[i]._id}:`, error)
+      const fileId = files[i]._id.toString();
+      const documentIds = fileReferences.get(fileId) || [];
+      
+      if (documentIds.length === 0) {
+        // File is not referenced by any document, safe to delete
+        try {
+          await bucket.delete(files[i]._id);
+          console.log(`Deleted unreferenced file: ${fileId}, uploaded at ${files[i].metadata?.uploadedAt}`);
+          deletedCount++;
+        } catch (error) {
+          console.error(`Failed to delete file ${fileId}:`, error);
+        }
+      } else {
+        // File is still referenced by documents, DO NOT DELETE
+        console.log(`Keeping referenced file: ${fileId}, used by ${documentIds.length} documents`);
+        for (const docId of documentIds) {
+          console.log(`  - Referenced by document: ${docId}`);
+        }
       }
     }
+    
+    console.log(`Cleanup summary: kept ${files.length - deletedCount} files, deleted ${deletedCount} unreferenced files`);
   } catch (error) {
-    console.error('Error cleaning up old files:', error)
+    console.error('Error cleaning up old files:', error);
   }
 }
 
@@ -283,15 +336,325 @@ export async function POST(
       return NextResponse.json({ error: 'Missing file or document data' }, { status: 400 })
     }
 
-    const documentData = JSON.parse(documentStr) as { type: 'pdf' | 'image'; data: string }
-
+    const documentData = JSON.parse(documentStr) as { 
+      type: 'pdf' | 'image'; 
+      data: string;
+      overwriteExisting?: boolean;
+      existingDocumentId?: string;
+      forceExtract?: boolean;
+    }
+    
+    // Check if this is a document replacement request
+    const isReplacement = documentData.overwriteExisting && documentData.existingDocumentId;
+    const forceExtract = documentData.forceExtract === true;
+    
+    // Define the type for processed data
+    let processedData: {
+      shipmentDetails: {
+        bolNumber: string;
+        bookingNumber: string;
+        carrierReference?: string;
+        vesselName: string;
+        voyageNumber: string;
+        portOfLoading: string;
+        portOfDischarge: string;
+        dateOfIssue: string;
+        shipmentDate: string;
+        totalContainers?: string;
+      };
+      parties: {
+        shipper: {
+          name: string;
+          address: string;
+          taxId: string;
+        };
+        consignee: {
+          name: string;
+          address: string;
+          taxId: string;
+        };
+        notifyParty: {
+          name: string;
+          address: string;
+        };
+      };
+      containers: any[];
+      commercial: {
+        currency: string;
+        freightTerms: string;
+        itnNumber: string;
+      };
+    } | undefined;
+    
     try {
+      // If this is a replacement request, let's check if we need to bypass Claude processing
+      if (isReplacement) {
+        console.log(`Replacement request for document ID: ${documentData.existingDocumentId}`)
+        
+        try {
+          // Find the existing document to get its BOL data
+          const existingDocument = await Document.findById(documentData.existingDocumentId)
+          
+          if (!existingDocument) {
+            console.error('Existing document not found for replacement:', documentData.existingDocumentId)
+            return NextResponse.json(
+              { error: 'Existing document not found for replacement' },
+              { status: 404 }
+            )
+          }
+          
+          console.log('Found existing document for replacement:', existingDocument._id);
+          console.log('Existing document bolData structure:', JSON.stringify({
+            bolNumber: existingDocument.bolData?.bolNumber,
+            carrierReference: existingDocument.bolData?.carrierReference,
+            totalWeight: existingDocument.bolData?.totalWeight,
+            hasContainers: Boolean(existingDocument.bolData?.containers?.length)
+          }));
+          
+          // Even if we have BOL data, we should still process with Claude to get the carrier's reference
+          // Continue with the normal processing flow, but save the existing document for reference
+          // We'll extract the current data with Claude, then merge with existing data where needed
+          
+          // Make sure the DB connection is established
+          if (!mongoose.connection.db) {
+            await mongoose.connection.asPromise()
+          }
+          
+          // Set up GridFS bucket with proper type safety
+          const db = mongoose.connection.db
+          if (!db) {
+            throw new Error('Database connection not available')
+          }
+          
+          // Use properly typed bucket
+          const bucket = new mongoose.mongo.GridFSBucket(db, { bucketName: 'documents' })
+          
+          // Process with Claude first to extract all data including the carrier's reference
+          console.log('Processing replacement document with Claude to extract all data')
+          if (!documentData.data) {
+            console.error('Document data is missing for Claude processing on replacement')
+            throw new Error('Document data is required for processing')
+          }
+          
+          let newProcessedData
+          try {
+            newProcessedData = await processDocumentWithClaude(documentData)
+            console.log('Successfully extracted data from replacement document')
+          } catch (claudeError) {
+            console.error('Error extracting data from replacement document:', claudeError)
+            
+            // Upload the file but keep existing BOL data
+            const uploadStream = bucket.openUploadStream(file.name)
+            
+            const arrayBuffer = await file.arrayBuffer()
+            const buffer = Buffer.from(arrayBuffer)
+            
+            // Write the file data to the stream
+            const writePromise = new Promise<void>((resolve, reject) => {
+              uploadStream.on('finish', () => resolve())
+              uploadStream.on('error', (error) => reject(error))
+              
+              // Write the buffer and end the stream
+              uploadStream.write(buffer)
+              uploadStream.end()
+            })
+            
+            await writePromise
+            console.log('File uploaded successfully for replacement, ID:', uploadStream.id)
+            
+            // Update the document with the new file ID
+            existingDocument.fileId = uploadStream.id
+            existingDocument.updatedAt = new Date()
+            await existingDocument.save()
+            
+            return NextResponse.json({
+              success: true,
+              message: 'Document replaced successfully (kept existing data)',
+              documentId: existingDocument._id,
+              document: existingDocument
+            })
+          }
+          
+          if (newProcessedData && existingDocument.bolData) {
+            // Create a clean object for totalWeight that matches the expected schema format
+            let totalWeight;
+
+            // Make sure we preserve the existing totalWeight structure if it exists
+            if (existingDocument.bolData && existingDocument.bolData.totalWeight && 
+                typeof existingDocument.bolData.totalWeight === 'object' &&
+                existingDocument.bolData.totalWeight.kg && 
+                existingDocument.bolData.totalWeight.lbs) {
+              // Create a clean object to avoid any schema validation issues
+              totalWeight = {
+                kg: existingDocument.bolData.totalWeight.kg,
+                lbs: existingDocument.bolData.totalWeight.lbs
+              };
+              console.log('Using existing totalWeight structure');
+            } else if (newProcessedData && newProcessedData.containers && newProcessedData.containers.length > 0) {
+              // Calculate totalWeight from containers if needed
+              totalWeight = {
+                kg: newProcessedData.containers.reduce((sum, container) => 
+                  sum + container.quantity.weight.kg, 0).toFixed(3),
+                lbs: newProcessedData.containers.reduce((sum, container) => 
+                  sum + container.quantity.weight.lbs, 0).toFixed(2)
+              };
+              console.log('Calculated new totalWeight from containers');
+            } else {
+              // Default fallback
+              totalWeight = {
+                kg: "0.000",
+                lbs: "0.00"
+              };
+              console.log('Using default totalWeight values');
+            }
+
+            console.log('Using properly structured totalWeight:', totalWeight);
+            
+            // Upload the file
+            const uploadStream = bucket.openUploadStream(file.name)
+            
+            const arrayBuffer = await file.arrayBuffer()
+            const buffer = Buffer.from(arrayBuffer)
+            
+            // Write the file data to the stream
+            const writePromise = new Promise<void>((resolve, reject) => {
+              uploadStream.on('finish', () => resolve())
+              uploadStream.on('error', (error) => reject(error))
+              
+              // Write the buffer and end the stream
+              uploadStream.write(buffer)
+              uploadStream.end()
+            })
+            
+            await writePromise
+            console.log('File uploaded successfully for replacement, ID:', uploadStream.id)
+            
+            // Log the carrier reference from the newly extracted data
+            console.log('Extracted carrier reference from replacement document:', {
+              carrierReference: newProcessedData.shipmentDetails.carrierReference,
+              existingCarrierReference: existingDocument.bolData.carrierReference
+            })
+            
+            // Merge the new processed data with existing data, prioritizing the new data
+            const updatedBolData = {
+              ...existingDocument.bolData,
+              // Prioritize newly extracted data for these fields
+              carrierReference: newProcessedData.shipmentDetails.carrierReference || existingDocument.bolData.carrierReference,
+              bookingNumber: newProcessedData.shipmentDetails.bookingNumber || existingDocument.bolData.bookingNumber,
+              vessel: newProcessedData.shipmentDetails.vesselName || existingDocument.bolData.vessel,
+              voyage: newProcessedData.shipmentDetails.voyageNumber || existingDocument.bolData.voyage,
+              // Use the clean totalWeight object
+              totalWeight: totalWeight
+            }
+            
+            console.log('Updated BOL data with newly extracted carrier reference:', updatedBolData.carrierReference)
+            console.log('Preserved totalWeight structure:', updatedBolData.totalWeight)
+            
+            // Make sure carrier reference is explicitly set on the document
+            existingDocument.bolData = updatedBolData;
+            existingDocument.markModified('bolData'); // Explicitly mark the field as modified
+            
+            // Update the document with the new file ID
+            existingDocument.fileId = uploadStream.id
+            existingDocument.updatedAt = new Date()
+            
+            try {
+              await existingDocument.save()
+              
+              // Do a double-check to validate the carrier reference field
+              const verifyDoc = await Document.findById(existingDocument._id) as any;
+              console.log('Verification check - carrier reference value:', 
+                verifyDoc?.bolData?.carrierReference || 'NOT FOUND');
+              
+              return NextResponse.json({
+                success: true,
+                message: 'Document replaced successfully with updated data',
+                documentId: existingDocument._id,
+                document: existingDocument
+              })
+            } catch (saveError) {
+              console.error('Error saving updated document:', saveError)
+              
+              // If there's a validation error, let's try a simpler approach
+              // Just update the file ID and carrier reference directly
+              try {
+                console.log('Attempting direct update with findByIdAndUpdate...');
+                console.log('Setting carrier reference to:', newProcessedData.shipmentDetails.carrierReference);
+                
+                // Use a direct update to set just the carrier reference field
+                // This avoids schema validation issues
+                const updatedDoc = await Document.findByIdAndUpdate(
+                  existingDocument._id,
+                  { 
+                    $set: { 
+                      fileId: uploadStream.id,
+                      updatedAt: new Date(),
+                      'bolData.carrierReference': newProcessedData.shipmentDetails.carrierReference 
+                    } 
+                  },
+                  { new: true }
+                );
+                
+                // Verify the update was successful
+                console.log('Direct update result - carrier reference:', 
+                  updatedDoc?.bolData?.carrierReference || 'NOT FOUND');
+                
+                return NextResponse.json({
+                  success: true,
+                  message: 'Document replaced and carrier reference updated',
+                  documentId: existingDocument._id,
+                  document: updatedDoc
+                });
+              } catch (finalError) {
+                console.error('Final attempt to update document failed:', finalError)
+                throw finalError
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Error during document replacement:', error)
+          // Continue with normal processing if we can't replace directly
+        }
+      }
+
       // Process document with Claude FIRST to verify the client match
       console.log('Processing document with Claude to verify client match')
-      const processedData = await processDocumentWithClaude(documentData)
+      
+      try {
+        // If document data is missing, we can't process with Claude
+        if (!documentData.data) {
+          console.error('Document data is missing for Claude processing')
+          throw new Error('Document data is required for processing')
+        }
+        
+        console.log('Sending document to Claude for processing, file name:', file.name);
+        processedData = await processDocumentWithClaude(documentData)
+        
+        // Log critical fields for debugging
+        console.log('Claude extraction results:');
+        console.log('  - BOL Number:', processedData.shipmentDetails.bolNumber || 'NOT FOUND');
+        console.log('  - Carrier Reference:', processedData.shipmentDetails.carrierReference || 'NOT FOUND');
+        console.log('  - Document Type:', file.name.includes('PL') ? 'Likely Packing List' : 'Likely BOL');
+        console.log('  - Shipper:', processedData.parties?.shipper?.name || 'NOT FOUND');
+        console.log('  - Consignee:', processedData.parties?.consignee?.name || 'NOT FOUND');
+        console.log('  - Container Count:', processedData.containers?.length || 0);
+      } catch (error) {
+        console.error('Error in processDocumentWithClaude:', error)
+        
+        // If this is a replacement, we could bypass Claude processing and just upload the file
+        if (isReplacement) {
+          console.log('Bypassing Claude processing for replacement document')
+          return NextResponse.json(
+            { error: 'Failed to process replacement document. Please try again.' },
+            { status: 500 }
+          )
+        } else {
+          throw error
+        }
+      }
       
       if (!processedData || !processedData.shipmentDetails || !processedData.shipmentDetails.bolNumber) {
-        console.error('Failed to extract required information:', processedData)
+        console.error('Failed to extract required information:', JSON.stringify(processedData || {}, null, 2))
         throw new Error('Failed to extract required information from document')
       }
 
@@ -315,37 +678,50 @@ export async function POST(
         rif: client.rif
       })
 
+      // Validate that the consignee information matches this client
+      const validation = validateConsigneeData(processedData.parties.consignee)
+      console.log('Consignee validation:', {
+        consignee: processedData.parties.consignee,
+        errors: validation.errors,
+        isValid: validation.isValid
+      })
+
       // Verify client match
-      const isClientMatch = verifyClientMatch(processedData.parties.consignee, client)
+      const isClientMatch = processedData && verifyClientMatch(processedData.parties.consignee, client)
       if (!isClientMatch) {
-        // Find all clients to see if there's a match with any other client
+        // Find other clients with the same consignee name
         const allClients = await Client.find({})
+        
+        // Check if the consignee better matches a different client
         const matchingClient = allClients.find(c => 
           c._id.toString() !== client._id.toString() && 
-          verifyClientMatch(processedData.parties.consignee, c)
+          processedData && verifyClientMatch(processedData.parties.consignee, c)
         )
         
         const errorMessage = matchingClient
-          ? `This BOL belongs to ${matchingClient.name}, not ${client.name}. Please select the correct client.`
-          : `This BOL doesn't appear to belong to ${client.name}. Please verify the selected client.`
+          ? `This document appears to belong to ${matchingClient.name} instead of ${client.name}. Please select the correct client.`
+          : 'The client in the document does not match the selected client.'
         
         console.error(errorMessage)
-        
-        // Return a graceful error response instead of throwing an error
-        return NextResponse.json({ 
-          error: errorMessage,
-          status: 'client_mismatch',
-          suggestedClient: matchingClient ? {
-            id: matchingClient._id.toString(),
-            name: matchingClient.name
-          } : null
-        }, { status: 400 })
+        return NextResponse.json(
+          { 
+            error: errorMessage,
+            status: 'client_mismatch',
+            suggestedClient: matchingClient ? {
+              id: matchingClient._id.toString(),
+              name: matchingClient.name,
+              rif: matchingClient.rif
+            } : null
+          },
+          { status: 400 }
+        )
       }
-
-      console.log('Client verification passed:', {
-      clientId: client._id,
-        clientName: client.name,
-        bolNumber: processedData.shipmentDetails.bolNumber
+      
+      // Log successful document processing
+      console.log('Successfully processed document:', {
+        bolNumber: processedData.shipmentDetails.bolNumber,
+        containerCount: processedData.containers.length,
+        carrierReference: processedData.shipmentDetails.carrierReference || 'Not found'
       })
 
       // If verification passed, proceed with storing the document
@@ -403,13 +779,25 @@ export async function POST(
         fileId: uploadStream.id,
         type: 'BOL' as const,
         items: processedData.containers.map((container, index) => {
-          const { product, packaging } = extractProductAndPackaging(container.product.description);
+          // Use product.name from Claude's response for the product
+          // and extract packaging from product.description 
+          const productName = container.product.name || ''; // Get product name directly
+          const { product: descriptionProduct, packaging } = extractProductAndPackaging(container.product.description);
+          
+          // Log the fields for debugging
+          console.log(`Container ${index+1} mapping:`, {
+            claudeProductName: container.product.name,
+            claudeProductDescription: container.product.description,
+            extractedProduct: productName || descriptionProduct,
+            extractedPackaging: packaging
+          });
+          
           return {
             itemNumber: index + 1,
             containerNumber: container.containerNumber,
             seal: container.sealNumber || '',
             description: container.product.description, // Keep original description
-            product, // Store extracted product
+            product: productName || descriptionProduct, // Prefer the name field, fallback to extracted
             packaging, // Store extracted packaging
             quantity: {
               litros: container.quantity.volume.liters.toFixed(2),
@@ -443,7 +831,26 @@ export async function POST(
         'bolData.bolNumber': processedData.shipmentDetails.bolNumber
       })
 
-      if (existingDocument) {
+      if (existingDocument && !documentData.overwriteExisting) {
+        // Return a warning that the BOL already exists
+        console.log('BOL already exists:', processedData.shipmentDetails.bolNumber);
+        return NextResponse.json({
+          warning: true,
+          message: `A Bill of Lading with number ${processedData.shipmentDetails.bolNumber} has already been uploaded for this client.`,
+          existingDocumentId: existingDocument._id.toString(),
+          duplicate: true,
+          document: {
+            id: existingDocument._id,
+            bolData: existingDocument.bolData,
+            items: existingDocument.items
+          }
+        }, { status: 200 });
+      }
+
+      // If overwriteExisting is true and document exists, update the existing document
+      if (existingDocument && documentData.overwriteExisting) {
+        console.log('Overwriting existing document:', existingDocument._id);
+        
         // If updating, delete the old file from GridFS
         if (existingDocument.fileId) {
           try {
@@ -453,13 +860,25 @@ export async function POST(
             console.error('Error deleting old file:', error)
           }
         }
-        // Update existing document
-        existingDocument.set(dbDocumentData)
-        await existingDocument.save()
-      } else {
-        // Create new document record
-        existingDocument = await Document.create(dbDocumentData)
+        
+        // Update existing document with new file ID and data
+        existingDocument.fileId = uploadStream.id;
+        existingDocument.set(dbDocumentData);
+        await existingDocument.save();
+
+    return NextResponse.json({
+          success: true,
+          documentId: existingDocument._id.toString(),
+          document: {
+            id: existingDocument._id,
+            bolData: existingDocument.bolData,
+            items: existingDocument.items
+          }
+        });
       }
+
+      // Create new document record
+      const newDocument = await Document.create(dbDocumentData);
 
       // Update client's last document date
       await Client.findByIdAndUpdate(
@@ -468,13 +887,13 @@ export async function POST(
         { new: true }
       )
 
-    return NextResponse.json({
+      return NextResponse.json({
         success: true,
-        documentId: existingDocument._id.toString(),
+        documentId: newDocument._id.toString(),
         document: {
-          id: existingDocument._id,
-          bolData: existingDocument.bolData,
-          items: existingDocument.items
+          id: newDocument._id,
+          bolData: newDocument.bolData,
+          items: newDocument.items
         }
       })
     } catch (error) {

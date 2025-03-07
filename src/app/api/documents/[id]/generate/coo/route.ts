@@ -15,19 +15,39 @@ import { Readable } from 'stream'
 function extractProductName(description: string): string {
   if (!description) return '';
   
-  // Even more aggressively remove packaging info patterns
-  const cleanedDesc = description
+  // Common packaging terms to remove
+  const packagingTerms = [
+    'flexitank', 'flexi tank', 'flexi-tank',
+    'iso tank', 'isotank', 'iso-tank',
+    'drum', 'drums', 'barrel', 'barrels',
+    'container', 'bulk', 'ibc', 'tote'
+  ];
+  
+  // Create a regex pattern to match any packaging term (case insensitive, whole word)
+  const packagingPattern = new RegExp(`\\b(${packagingTerms.join('|')})\\b`, 'gi');
+  
+  // Clean the description by removing packaging terms
+  let cleanedDesc = description
     // First remove common quantity + packaging patterns
     .replace(/^\d+\s+(?:FLEXI\s+TANK|FLEXITANK|FLEXI-TANK|IBC|DRUM|DRUMS|CONTAINER|BULK|TOTE)s?\s+/i, '')
     // Then remove standalone packaging words (without quantities)
-    .replace(/^(?:FLEXI\s+TANK|FLEXITANK|FLEXI-TANK|IBC|DRUM|DRUMS|CONTAINER|BULK|TOTE)s?\s+/i, '')
+    .replace(packagingPattern, '')
     // Strip any remaining numeric prefixes that might be part of packaging (e.g. "1 Base Oil")
     .replace(/^\d+\s+/, '')
     // Remove any "X" that might appear at the beginning (sometimes used as a count)
     .replace(/^X\s+/i, '')
+    // Clean up any multiple spaces created by the replacements
+    .replace(/\s+/g, ' ')
     .trim();
   
   console.log(`COO extractProductName transform: "${description}" -> "${cleanedDesc}"`);
+  
+  // If after cleaning we have nothing left, return the original (better than nothing)
+  if (!cleanedDesc && description) {
+    console.log(`Warning: Cleaning removed all text from product name, using original: "${description}"`);
+    return description;
+  }
+  
   return cleanedDesc;
 }
 
@@ -157,7 +177,7 @@ function drawDocumentHeader(
   return height - 160; // Return Y coordinate for next section
 }
 
-// Adjust the spacing in drawDocumentBody
+// Adjust the parameters of drawDocumentBody function to include per-container products
 function drawDocumentBody(
   page: PDFPage,
   pdfDoc: PDFDocument,
@@ -173,10 +193,15 @@ function drawDocumentBody(
     bolNumber: string;
     vesselName: string;
     voyageNumber: string;
-    containers: Array<{containerNumber: string, sealNumber: string}>;
-    productName: string;
+    containers: Array<{
+      containerNumber: string, 
+      sealNumber: string,
+      product?: string // Add product for each container
+    }>;
+    productName: string; // This will now be the combined product names for display
     portOfLoading: string;
     portOfDischarge: string;
+    hasMultipleProducts?: boolean; // Flag to indicate if there are multiple products
   }
 ) {
   const { width } = page.getSize()
@@ -301,7 +326,12 @@ function drawDocumentBody(
   
   // Containers and Seals - improved table format with smaller spacing
   if (data.containers.length > 0) {
-    page.drawText("Containers and Seals:", {
+    // Change heading based on whether we're showing product information
+    const tableHeader = data.hasMultipleProducts 
+      ? "Containers and Products:" 
+      : "Containers and Seals:";
+      
+    page.drawText(tableHeader, {
       x: margin,
       y: currentY,
       size: 10,
@@ -309,13 +339,15 @@ function drawDocumentBody(
     });
     currentY -= compactLineHeight
     
-    // Create a proper table with two columns
     // Table headers with proper formatting and alignment
     const containerLabel = "Container";
     const sealLabel = "Load seal";
     
+    // Determine column positions based on whether we show product info
+    const containerX = data.hasMultipleProducts ? margin + 20 : margin + 80;
+    const sealX = data.hasMultipleProducts ? margin + 150 : margin + 280;
+    
     // Create container column
-    const containerX = margin + 80;
     page.drawText(containerLabel, {
       x: containerX,
       y: currentY,
@@ -324,13 +356,26 @@ function drawDocumentBody(
     });
     
     // Create seal column
-    const sealX = margin + 280;
     page.drawText(sealLabel, {
       x: sealX,
       y: currentY,
       size: 10, // Reduced font size
       font: fonts.bold
     });
+    
+    // Create product column if needed
+    let productX = 0;
+    if (data.hasMultipleProducts) {
+      productX = margin + 250;
+      const productLabel = "Product";
+      page.drawText(productLabel, {
+        x: productX,
+        y: currentY,
+        size: 10, // Reduced font size
+        font: fonts.bold
+      });
+    }
+    
     currentY -= compactLineHeight
     
     // Container rows with better alignment and smaller spacing
@@ -348,6 +393,18 @@ function drawDocumentBody(
         size: 10, // Reduced font size
         font: fonts.regular
       });
+      
+      // Add product information for each container if available and we have multiple products
+      if (data.hasMultipleProducts && container.product) {
+        const cleanedContainerProduct = extractProductName(container.product);
+        page.drawText(cleanedContainerProduct, {
+          x: productX,
+          y: currentY,
+          size: 10, // Reduced font size
+          font: fonts.regular
+        });
+      }
+      
       currentY -= compactLineHeight // Using compact line height
     }
   }
@@ -363,26 +420,8 @@ function drawDocumentBody(
     font: fonts.bold
   });
   
-  // Format product name to match sample (Base Oil Group II, ARAMCO PRIMA 600N)
-  // Add safety checks to handle empty product names
-  const productNameTrimmed = (data.productName || '').trim();
-  console.log("Raw product name before formatting:", productNameTrimmed);
-  
-  // Check if the product name still contains packaging info and remove it
-  // Here we guarantee that no packaging info remains in the product name
-  const cleanedProductName = extractProductName(productNameTrimmed);
-  console.log("Product name after removing packaging:", cleanedProductName);
-  
-  // Ensure all packaging references are removed before formatting
-  const formattedProductName = cleanedProductName
-    ? cleanedProductName
-        .replace(/base oil group ii/i, 'Base Oil Group II,')
-        .replace(/600n/i, '600N')
-        .replace(/(\d+)n/i, '$1N') // Generic replacement for any number followed by 'N'
-        .toUpperCase()
-    : "[NO PRODUCT NAME FOUND]"; // Default text if no product name is available
-  
-  console.log("Formatted product name for document:", formattedProductName);
+  // Use the combined product names provided from the caller
+  const formattedProductName = data.productName; 
   
   page.drawText(formattedProductName, {
     x: margin + 130,
@@ -1280,8 +1319,160 @@ export async function POST(
     console.log("Product extraction debug info:", JSON.stringify(productDebugInfo, null, 2));
     console.log("Extracted unique products:", JSON.stringify(Array.from(uniqueProducts), null, 2));
     
-    // Get authenticated user's name
+    // Try to extract a meaningful product name from the BOL data
+    const productLookupOrder = [
+      // First check if all items have the same non-empty product field
+      () => {
+        if (!bolDocument.items || bolDocument.items.length === 0) return null;
+        
+        // Filter to only items with a product name
+        const itemsWithProduct = bolDocument.items.filter((item: any) => 
+          item.product && typeof item.product === 'string' && item.product.trim() !== ''
+        );
+        
+        // If no items have a product field, can't use this method
+        if (itemsWithProduct.length === 0) return null;
+        
+        // Get unique product names
+        const uniqueProductNames = [...new Set(itemsWithProduct.map((item: any) => 
+          item.product.trim().toUpperCase()
+        ))];
+        
+        // If all items have the same product, use that
+        if (uniqueProductNames.length === 1) {
+          console.log("Found consistent product name across all items:", uniqueProductNames[0]);
+          return extractProductName(uniqueProductNames[0] as string);
+        }
+        
+        // For multiple products, combine them with " / "
+        if (uniqueProductNames.length > 0) {
+          // Get clean product names for all uniqueProductNames
+          const cleanProductNames = uniqueProductNames.map(name => extractProductName(name as string));
+          console.log("Found multiple product names, combining:", cleanProductNames);
+          return cleanProductNames.join(" / ");
+        }
+        
+        return null;
+      },
+      
+      // Then try to extract from descriptions if products aren't available
+      () => {
+        if (!bolDocument.items || bolDocument.items.length === 0) return null;
+        
+        // Filter to only items with a description
+        const itemsWithDescription = bolDocument.items.filter((item: any) => 
+          item.description && typeof item.description === 'string' && item.description.trim() !== ''
+        );
+        
+        // If no items have a description field, can't use this method
+        if (itemsWithDescription.length === 0) return null;
+        
+        // Get unique descriptions
+        const uniqueDescriptions = [...new Set(itemsWithDescription.map((item: any) => 
+          item.description.trim().toUpperCase()
+        ))];
+        
+        // If all items have the same description, use that
+        if (uniqueDescriptions.length === 1) {
+          console.log("Found consistent description across all items:", uniqueDescriptions[0]);
+          return extractProductName(uniqueDescriptions[0] as string);
+        }
+        
+        // For multiple descriptions, combine them
+        if (uniqueDescriptions.length > 0) {
+          const cleanDescriptions = uniqueDescriptions.map(desc => extractProductName(desc as string));
+          console.log("Found multiple descriptions, combining:", cleanDescriptions);
+          return cleanDescriptions.join(" / ");
+        }
+        
+        return null;
+      },
+      
+      // Finally, fall back to the BOL data field if available
+      () => {
+        if (bolDocument.bolData && bolDocument.bolData.commodity) {
+          console.log("Using commodity from BOL data:", bolDocument.bolData.commodity);
+          return extractProductName(bolDocument.bolData.commodity);
+        }
+        return null;
+      }
+    ];
     
+    // Try each product lookup method in order until one works
+    let productName = "";
+    for (const lookupMethod of productLookupOrder) {
+      const result = lookupMethod();
+      if (result) {
+        productName = result;
+        console.log("Raw combined product name:", productName);
+        break;
+      }
+    }
+    
+    // If no product name was found, use a default
+    if (!productName) {
+      console.log("No product name could be determined, using default");
+      productName = "BASE OIL";
+    }
+    
+    // Format the product name for the document
+    productName = productName
+      .replace(/base oil group ii/i, 'Base Oil Group II,')
+      .replace(/base oil group 2/i, 'Base Oil Group II,')
+      .replace(/600n/i, '600N')
+      .replace(/300n/i, '300N')
+      .replace(/(\d+)n/i, '$1N') // Generic replacement for any number followed by 'N'
+      .toUpperCase();
+    
+    console.log("Formatted combined product name for document:", productName);
+    
+    // Get a cleaned product name for use throughout the document
+    const cleanedDocProductName = productName;
+    console.log("Cleaned product name for full document:", cleanedDocProductName);
+    
+    // Create enhanced containers with product information
+    const containersWithProducts = [];
+    if (bolDocument.items && bolDocument.items.length > 0) {
+      for (const item of bolDocument.items as Array<{
+        containerNumber: string;
+        seal: string;
+        product?: string;
+        description?: string;
+      }>) {
+        containersWithProducts.push({
+          containerNumber: item.containerNumber,
+          sealNumber: item.seal,
+          product: item.product || extractProductName(item.description || '')
+        });
+      }
+    } else {
+      // Fall back to original containers if no items
+      containers.forEach(container => {
+        containersWithProducts.push({
+          ...container,
+          product: undefined
+        });
+      });
+    }
+    
+    // Log the enhanced containers
+    console.log("Enhanced containers with products:", JSON.stringify(containersWithProducts, null, 2));
+    
+    // Determine if there are multiple product types
+    const uniqueProductTypes = new Set<string>();
+    containersWithProducts.forEach(container => {
+      if (container.product) {
+        uniqueProductTypes.add(container.product);
+      }
+    });
+    
+    const hasMultipleProducts = uniqueProductTypes.size > 1;
+    console.log(`Document has ${uniqueProductTypes.size} unique product types. Multiple products: ${hasMultipleProducts}`);
+    
+    // Only show product column in the container table if there are multiple product types
+    const drawingOptions = {
+      hasMultipleProducts: hasMultipleProducts
+    };
 
     let y = 0;
     
@@ -1321,15 +1512,16 @@ export async function POST(
               bolNumber: bolDocument.bolData?.bolNumber || '',
               vesselName: bolDocument.bolData?.vessel || '',
               voyageNumber: bolDocument.bolData?.voyage || '',
-              containers,
-              productName: uniqueProducts.size > 0 ? extractProductName(Array.from(uniqueProducts)[0]) : '',
+              containers: containersWithProducts,
+              productName: cleanedDocProductName,
               portOfLoading: bolDocument.bolData?.portOfLoading || '',
-              portOfDischarge: bolDocument.bolData?.portOfDischarge || ''
+              portOfDischarge: bolDocument.bolData?.portOfDischarge || '',
+              hasMultipleProducts: drawingOptions.hasMultipleProducts
             }
           );
           
           // Log the product name being used
-          const cleanedBodyProductName = uniqueProducts.size > 0 ? extractProductName(Array.from(uniqueProducts)[0]) : '';
+          const cleanedBodyProductName = cleanedDocProductName;
           console.log("Product name used for section 'body':", cleanedBodyProductName || '[EMPTY]');
           break;
           
@@ -1353,10 +1545,6 @@ export async function POST(
       }
     } else {
       // Draw the complete document with all sections
-      
-      // Get a cleaned product name for use throughout the document
-      const cleanedDocProductName = uniqueProducts.size > 0 ? extractProductName(Array.from(uniqueProducts)[0]) : '';
-      console.log("Cleaned product name for full document:", cleanedDocProductName);
       
       // Draw header
       console.log("🛑 BEFORE DRAWING DOCUMENT HEADER, date to use:", formattedBusinessDay, "source:", dateSource);
@@ -1387,10 +1575,11 @@ export async function POST(
           bolNumber: bolDocument.bolData?.bolNumber || '',
           vesselName: bolDocument.bolData?.vessel || '',
           voyageNumber: bolDocument.bolData?.voyage || '',
-          containers,
+          containers: containersWithProducts,
           productName: cleanedDocProductName,
           portOfLoading: bolDocument.bolData?.portOfLoading || '',
-          portOfDischarge: bolDocument.bolData?.portOfDischarge || ''
+          portOfDischarge: bolDocument.bolData?.portOfDischarge || '',
+          hasMultipleProducts: drawingOptions.hasMultipleProducts
         }
       );
       

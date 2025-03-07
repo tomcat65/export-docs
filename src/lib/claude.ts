@@ -26,7 +26,6 @@ interface ProcessedDocument {
   shipmentDetails: {
     bolNumber: string
     bookingNumber: string
-    carrierReference: string
     vesselName: string
     voyageNumber: string
     portOfLoading: string
@@ -34,6 +33,7 @@ interface ProcessedDocument {
     dateOfIssue: string
     shipmentDate: string
     totalContainers?: string
+    carrierReference?: string
   }
   parties: {
     shipper: {
@@ -72,11 +72,22 @@ const anthropic = new Anthropic({
 async function callClaudeWithRetry(
   systemPrompt: string,
   userPrompt: string,
-  document: { type: 'pdf' | 'image'; data: string },
+  document: { type: 'pdf' | 'image'; data?: string },
   retryCount = 0
 ): Promise<any> {
   try {
-    const contentBlock = document.type === 'pdf' 
+    console.log(`Calling Claude API (attempt ${retryCount + 1})`)
+    const anthropic = new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY
+    })
+
+    // Check if document data is present - critical for replacement workflows
+    if (!document.data) {
+      console.warn('Document data is missing - this might be a replacement request without document data')
+      throw new Error('Document data is required for Claude processing')
+    }
+
+    const contentBlock = document.type === 'pdf'
       ? {
           type: 'document' as const,
           source: {
@@ -153,8 +164,14 @@ Your task is to analyze ALL PAGES of the provided Bill of Lading ${document.type
 CRITICAL RULES:
 - IMPORTANT: Read and analyze ALL PAGES of the document thoroughly
 - Extract ALL information EXACTLY as shown in the document
-- For the BOL number, use ONLY the number shown in "B/L No." field
-- For the carrier's reference use the number shown in the "Carrier's Reference" field
+- For the BOL number:
+  * Use ONLY the number shown in "B/L No." field
+  * This is usually in the header or top section of the document
+  * Do NOT use the document identifier as the BOL number unless it is explicitly labeled as B/L No.
+- For the carrier's reference:
+  * Use ONLY the number shown in the "Carrier's Reference" field if it exists
+  * This is a specific field distinct from the BOL number
+  * Leave it as an empty string "" if not found
 - Convert measurements to all requested units
 - Create separate entries for each container/item
 - Use empty string "" for missing text fields
@@ -166,26 +183,28 @@ CRITICAL RULES:
 
 Pay special attention to:
 1. The document header for BOL number, vessel details, and dates
-2. ALL pages of the "PARTICULARS FURNISHED BY SHIPPER" section for complete container details
-3. The shipper, consignee, and notify party sections for complete address information
-4. Any continuation pages that may contain additional container or cargo details`
+2. The "Carrier's Reference" field which contains important reference numbers - MAKE SURE TO EXTRACT THIS CORRECTLY
+3. ALL pages of the "PARTICULARS FURNISHED BY SHIPPER" section for complete container details
+4. The shipper, consignee, and notify party sections for complete address information
+5. Any continuation pages that may contain additional container or cargo details`
 
-    const userPrompt = `I'm providing you with a Bill of Lading document that may have multiple pages.
+    const userPrompt = `I'm providing you with a Bill of Lading (BOL) document that may have multiple pages.
 Please analyze ALL PAGES thoroughly and extract the information into the following JSON structure.
-Pay special attention to container details that may span multiple pages.
 
 IMPORTANT: Make sure to:
 1. Read and analyze every page of the document
 2. Combine information that spans across pages
 3. Include ALL containers and their details from ALL pages
-4. Verify totals match the sum of all items across all pages
+4. For "bolNumber", use ONLY the actual Bill of Lading number (B/L No.)  
+5. For "carrierReference", use ONLY the actual Carrier's Reference number if present
+6. Verify totals match the sum of all items across all pages
 
 Return this EXACT JSON structure with the values found:
 {
   "shipmentDetails": {
-    "bolNumber": "",        // From "B/L No." field in header
+    "bolNumber": "",        // ONLY from "B/L No." field in header
     "bookingNumber": "",    // From booking reference if available
-    "carrierReference": "", // From Carrier's Reference" field
+    "carrierReference": "", // ONLY from "Carrier's Reference" field - not the document number itself
     "vesselName": "",       // Vessel name only
     "voyageNumber": "",     // Voyage number if available
     "portOfLoading": "",    // Port of loading
@@ -276,9 +295,27 @@ Return this EXACT JSON structure with the values found:
       if (!data.shipmentDetails) {
         throw new Error('Missing shipmentDetails section')
       }
+
+      // Handle the case where Claude puts the BOL number in carrierReference instead
+      if (!data.shipmentDetails.bolNumber && data.shipmentDetails.carrierReference) {
+        console.log(`No BOL number found, but carrierReference exists: ${data.shipmentDetails.carrierReference}`);
+        
+        // Sometimes Claude incorrectly puts the BOL number in the carrier reference field
+        // Only use it if it looks like a BOL number format (alphanumeric without spaces)
+        if (/^[A-Za-z0-9]+$/.test(data.shipmentDetails.carrierReference)) {
+          console.log(`Using carrier reference as BOL number: ${data.shipmentDetails.carrierReference}`);
+          data.shipmentDetails.bolNumber = data.shipmentDetails.carrierReference;
+          // We're keeping the original carrierReference value, as we're merely copying it to bolNumber
+        } else {
+          console.log(`Carrier reference doesn't look like a BOL number format, not using it.`);
+        }
+      }
+      
+      // Now check if we have a BOL number after the potential extraction
       if (!data.shipmentDetails.bolNumber) {
         throw new Error('Missing BOL number in shipmentDetails')
       }
+
       if (!data.parties) {
         throw new Error('Missing parties section')
       }
@@ -317,6 +354,17 @@ Return this EXACT JSON structure with the values found:
         bolNumber: data.shipmentDetails.bolNumber,
         containerCount: data.containers.length
       })
+
+      // Ensure carrier reference field exists and has the correct name
+      // @ts-ignore - Check for misnamed field
+      if (data.shipmentDetails.carriersReference !== undefined && data.shipmentDetails.carrierReference === undefined) {
+        // Fix naming inconsistency if present
+        // @ts-ignore - Access misnamed field
+        data.shipmentDetails.carrierReference = data.shipmentDetails.carriersReference;
+        // @ts-ignore - Delete misnamed field
+        delete data.shipmentDetails.carriersReference;
+        console.log('Fixed carrier reference field name in Claude response');
+      }
 
       return data
     } catch (error) {

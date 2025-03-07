@@ -64,10 +64,10 @@ export async function GET(
 
     // Serialize MongoDB documents
     const serializedDocuments = documents.map(doc => ({
-      _id: doc._id.toString(),
-      clientId: doc.clientId.toString(),
+      _id: (doc._id as Types.ObjectId).toString(),
+      clientId: (doc.clientId as Types.ObjectId).toString(),
       fileName: doc.fileName,
-      fileId: doc.fileId.toString(),
+      fileId: (doc.fileId as Types.ObjectId).toString(),
       type: doc.type,
       relatedBolId: doc.relatedBolId?.toString(),
       createdAt: doc.createdAt.toISOString(),
@@ -85,4 +85,19 @@ export async function GET(
       { status: 500 }
     )
   }
-} 
+}
+
+// Client-side code example
+async function checkDocument(documentId: string) {
+  const response = await fetch(`/api/documents/${documentId}/exists`);
+  const data = await response.json();
+  
+  console.log('Document status:', data);
+  
+  if (!data.exists && data.possibleFileId) {
+    console.log('Document can be repaired with file:', data.possibleFileId);
+  }
+}
+
+// Call with your document ID
+checkDocument('67c958dc57bfddf075c9391a'); 

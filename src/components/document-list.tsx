@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/card'
 import { RelatedDocuments } from './related-documents'
 import { format } from 'date-fns'
+import { cn } from '@/lib/utils'
 
 interface Container {
   containerNumber: string
@@ -682,6 +683,10 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
                             <div>
                               <p className="text-sm font-medium text-gray-500">Carrier's Reference</p>
                               <p>{bolDoc.bolData?.carrierReference || 'N/A'}</p>
+                              <div className="text-xs text-gray-400 mt-1">
+                                Debug: Type={typeof bolDoc.bolData?.carrierReference}, 
+                                Value="{bolDoc.bolData?.carrierReference || 'undefined'}"
+                              </div>
                             </div>
                           </div>
 

@@ -47,10 +47,32 @@ export async function GET(
       const fileId = typeof document.fileId === 'string' 
         ? new mongoose.Types.ObjectId(document.fileId)
         : document.fileId;
+      
+      console.log(`Attempting to view document ${id} with fileId ${fileId} and filename ${document.fileName || 'unknown'}`);
         
       const file = await bucket.find({ _id: fileId }).next()
       if (!file) {
-        return new NextResponse('File not found', { status: 404 })
+        console.log(`File not found: fileId ${fileId} for document ${id}`);
+        
+        // Check if a file with the same name exists with a different ID
+        let possibleFileId = null;
+        if (document.fileName) {
+          const filesByName = await bucket.find({ filename: document.fileName }).toArray();
+          if (filesByName.length > 0) {
+            possibleFileId = filesByName[0]._id;
+            console.log(`Found potential file match: ${possibleFileId} with filename ${document.fileName}`);
+          }
+        }
+        
+        return NextResponse.json({
+          error: 'File not found',
+          message: 'The document record exists but the associated file cannot be found.',
+          helpText: 'You may use the repair endpoint to fix the document record if a file with the same name exists.',
+          documentId: id,
+          fileId: fileId.toString(),
+          fileName: document.fileName,
+          possibleFileId: possibleFileId ? possibleFileId.toString() : null
+        }, { status: 404 });
       }
 
       const downloadStream = bucket.openDownloadStream(fileId)

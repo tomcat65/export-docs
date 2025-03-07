@@ -28,13 +28,13 @@ export async function DELETE(
     }
 
     // Get GridFS buckets for file deletions
-    const documentsBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db!, {
-      bucketName: 'documents'
-    })
+    const db = mongoose.connection.db
+    if (!db) {
+      throw new Error('Database connection not available')
+    }
     
-    const fsBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db!, {
-      bucketName: 'fs'
-    })
+    const documentsBucket = new mongoose.mongo.GridFSBucket(db, { bucketName: 'documents' })
+    const fsBucket = new mongoose.mongo.GridFSBucket(db, { bucketName: 'fs' })
 
     // Function to delete a document and its file
     const deleteDocumentAndFile = async (docId: mongoose.Types.ObjectId, fileId: mongoose.Types.ObjectId) => {
