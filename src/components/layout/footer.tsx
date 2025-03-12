@@ -3,6 +3,7 @@
 import { Building2, Globe2, Linkedin, Mail, MapPin, Phone } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import Image from 'next/image'
+import ReactCountryFlag from 'react-country-flag'
 
 export function Footer() {
   const currentYear = new Date().getFullYear()
@@ -25,7 +26,16 @@ export function Footer() {
                 <span>6300 N Main Rd, Houston, TX 77009</span>
               </p>
               <p className="flex items-center gap-2">
-                <Globe2 className="h-4 w-4 text-blue-600" />
+                <span style={{ display: 'inline-block', width: '1.2em', height: '1.2em' }}>
+                  <ReactCountryFlag 
+                    countryCode="US"
+                    svg
+                    style={{ 
+                      width: '100%', 
+                      height: '100%' 
+                    }}
+                  />
+                </span>
                 <span>United States of America</span>
               </p>
             </div>

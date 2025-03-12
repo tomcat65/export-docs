@@ -552,7 +552,7 @@ export function RelatedDocuments({
       // Create a file input element
       const fileInput = document.createElement('input');
       fileInput.type = 'file';
-      fileInput.accept = '.pdf,.doc,.docx'; // Accept common document formats
+      fileInput.accept = '.pdf,.doc,.docx,.jpg,.jpeg,.png,.tiff,.gif'; // Accept document and image formats for scanned documents
       
       // Create a promise to handle the file selection
       const fileSelected = new Promise<File | null>((resolve) => {
@@ -683,7 +683,7 @@ export function RelatedDocuments({
       const fileInput = document.createElement('input');
       fileInput.type = 'file';
       fileInput.multiple = true;
-      fileInput.accept = '.pdf,.doc,.docx'; // Accept common document formats
+      fileInput.accept = '.pdf,.doc,.docx,.jpg,.jpeg,.png,.tiff,.gif'; // Accept document and image formats for scanned documents
       
       // Create a promise to handle the file selection
       const filesSelected = new Promise<FileList | null>((resolve) => {
@@ -1106,6 +1106,11 @@ export function RelatedDocuments({
       
       {relatedDocumentsExpanded && (
         <div className="space-y-4 mt-2">
+          {/* Add a note about supported file formats */}
+          <div className="text-xs text-muted-foreground">
+            <p>All document sections support PDF, Word (.doc, .docx), and scanned documents/images (.jpg, .jpeg, .png, .tiff, .gif)</p>
+          </div>
+          
           {/* Only show documents that exist on mobile, or all on desktop */}
           {(existingPL || !isMobile) && (
             <div className="flex flex-col space-y-2 border-b pb-3" data-section="PL">
