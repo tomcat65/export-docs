@@ -4,7 +4,7 @@ export interface IDocument {
   clientId: mongoose.Types.ObjectId
   fileName: string
   fileId: mongoose.Types.ObjectId  // GridFS file ID
-  type: 'BOL' | 'PL' | 'COO'  // Adding COO type for Certificate of Origin
+  type: 'BOL' | 'PL' | 'COO' | 'INVOICE_EXPORT' | 'INVOICE' | 'COA' | 'SED' | 'DATA_SHEET' | 'SAFETY_SHEET'  // Document types
   relatedBolId?: mongoose.Types.ObjectId  // Reference to original BOL document
   packingListData?: {
     documentNumber: string  // e.g. "1092-PL"
@@ -90,7 +90,7 @@ const documentSchema = new mongoose.Schema<IDocument>({
   },
   type: {
     type: String,
-    enum: ['BOL', 'PL', 'COO'],
+    enum: ['BOL', 'PL', 'COO', 'INVOICE_EXPORT', 'INVOICE', 'COA', 'SED', 'DATA_SHEET', 'SAFETY_SHEET'],
     required: true
   },
   relatedBolId: {

@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/use-toast'
 import { Loader2, Trash2, FileImage, Database, Menu, X } from 'lucide-react'
 import { useState } from 'react'
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard' },
@@ -130,6 +130,9 @@ export function Header() {
               </Button>
             </SheetTrigger>
             <SheetContent side="left" className="w-[240px] sm:w-[300px]">
+              <SheetHeader>
+                <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
+              </SheetHeader>
               <div className="flex flex-col gap-6 py-6">
                 <Link href="/dashboard" className="flex items-center gap-2" onClick={() => setIsOpen(false)}>
                   <Image src="/txwos-logo.png" alt="TXWOS Logo" width={24} height={24} priority />

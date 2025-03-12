@@ -78,7 +78,7 @@ interface Document {
   clientId: string
   fileName: string
   fileId: string
-  type: 'BOL' | 'PL' | 'COO'
+  type: 'BOL' | 'PL' | 'COO' | 'INVOICE_EXPORT' | 'INVOICE' | 'COA' | 'SED' | 'DATA_SHEET' | 'SAFETY_SHEET'
   relatedBolId?: string
   bolData?: BolData
   items?: Array<{

@@ -10,7 +10,7 @@ interface MongoDocument {
   clientId: Types.ObjectId
   fileName: string
   fileId: Types.ObjectId
-  type: 'BOL' | 'PL' | 'COO'
+  type: 'BOL' | 'PL' | 'COO' | 'INVOICE_EXPORT' | 'INVOICE' | 'COA' | 'SED' | 'DATA_SHEET' | 'SAFETY_SHEET'
   relatedBolId?: Types.ObjectId
   createdAt: Date
   updatedAt: Date
