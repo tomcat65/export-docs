@@ -79,6 +79,7 @@ interface Document {
   fileName: string
   fileId: string
   type: 'BOL' | 'PL' | 'COO' | 'INVOICE_EXPORT' | 'INVOICE' | 'COA' | 'SED' | 'DATA_SHEET' | 'SAFETY_SHEET'
+  subType?: string
   relatedBolId?: string
   bolData?: BolData
   items?: Array<{

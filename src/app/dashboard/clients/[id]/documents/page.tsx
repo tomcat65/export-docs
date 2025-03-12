@@ -12,6 +12,7 @@ interface SerializedDocument {
   fileName: string
   fileId: string
   type: 'BOL' | 'PL' | 'COO' | 'INVOICE_EXPORT' | 'INVOICE' | 'COA' | 'SED' | 'DATA_SHEET' | 'SAFETY_SHEET'
+  subType?: string  // Add subType field to identify export invoices
   relatedBolId?: string
   createdAt: string
   updatedAt: string
@@ -67,6 +68,7 @@ interface MongoDocument {
   fileName: string
   fileId: Types.ObjectId
   type: 'BOL' | 'PL' | 'COO' | 'INVOICE_EXPORT' | 'INVOICE' | 'COA' | 'SED' | 'DATA_SHEET' | 'SAFETY_SHEET'
+  subType?: string
   relatedBolId?: Types.ObjectId
   createdAt: Date
   updatedAt: Date
@@ -125,6 +127,7 @@ async function getClientWithDocuments(id: string): Promise<SerializedClient | nu
     fileName: doc.fileName,
     fileId: doc.fileId.toString(),
     type: doc.type,
+    subType: doc.subType,
     relatedBolId: doc.relatedBolId?.toString(),
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),

@@ -39,6 +39,7 @@ export async function GET(
       fileName: document.fileName,
       fileId: document.fileId.toString(),
       type: document.type,
+      subType: document.subType,
       relatedBolId: document.relatedBolId?.toString(),
       createdAt: document.createdAt.toISOString(),
       updatedAt: document.updatedAt.toISOString(),

@@ -69,6 +69,7 @@ export async function GET(
       fileName: doc.fileName,
       fileId: (doc.fileId as Types.ObjectId).toString(),
       type: doc.type,
+      subType: doc.subType,
       relatedBolId: doc.relatedBolId?.toString(),
       createdAt: doc.createdAt.toISOString(),
       updatedAt: doc.updatedAt.toISOString(),

@@ -14,7 +14,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Loader2, FileText, FilePlus, Edit, Save, RefreshCw, Trash2 } from 'lucide-react'
+import { Loader2, FileText, FilePlus, Edit, Save, RefreshCw, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
 import { PackingListEditor } from './packing-list-editor'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
@@ -25,6 +25,7 @@ interface Document {
   type: string
   fileName: string
   relatedBolId?: string
+  subType?: string
   packingListData?: {
     documentNumber: string
     date: string
@@ -62,6 +63,26 @@ export function RelatedDocuments({
     type: 'PL' | 'COO'
     mode: 'new' | 'overwrite'
   }>({ open: false, type: 'PL', mode: 'new' })
+  
+  // Add state for expanded sections
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+    'PL': true,
+    'COO': true,
+    'INVOICE_EXPORT': true,
+    'INVOICE': true,
+    'COA': true,
+    'SED': true,
+    'DATA_SHEET': true,
+    'SAFETY_SHEET': true
+  })
+  
+  // Function to toggle section expansion
+  const toggleSection = (sectionName: string) => {
+    setExpandedSections(prev => ({
+      ...prev,
+      [sectionName]: !prev[sectionName]
+    }))
+  }
   
   // Add state for the edit dialog
   const [editDialogOpen, setEditDialogOpen] = useState(false)
@@ -109,16 +130,69 @@ export function RelatedDocuments({
   const existingCOO = existingDocuments.find(
     (doc) => doc.type === 'COO' && doc.relatedBolId === bolId
   )
-  // Get arrays of each document type that can have multiple instances
-  const invoicesExport = existingDocuments.filter(
-    (doc) => doc.type === 'INVOICE_EXPORT' && doc.relatedBolId === bolId
-  )
-  const invoices = existingDocuments.filter(
+  
+  // Debug document data - full print of one document to see all fields
+  if (existingDocuments.length > 0) {
+    console.log('First document complete:', JSON.stringify(existingDocuments[0]));
+  }
+  
+  console.log('All documents:', existingDocuments.map(doc => ({
+    id: doc._id,
+    type: doc.type,
+    subType: doc.subType || 'MISSING',
+    hasSubType: doc.hasOwnProperty('subType'),
+    fileName: doc.fileName,
+    relatedBolId: doc.relatedBolId
+  })));
+  
+  // Get arrays of each document type that can have multiple instances - modified logic for debugging
+  
+  // First, capture all invoices for debugging
+  const allInvoices = existingDocuments.filter(
     (doc) => doc.type === 'INVOICE' && doc.relatedBolId === bolId
-  )
+  );
+  console.log('All invoices:', allInvoices.map(doc => ({
+    id: doc._id,
+    type: doc.type,
+    subType: doc.subType || 'MISSING',
+    hasSubType: doc.hasOwnProperty('subType'),
+    fileName: doc.fileName
+  })));
+  
+  // Then, simplify the export invoice logic and be more lenient
+  const invoicesExport = existingDocuments.filter(
+    (doc) => ((doc.type === 'INVOICE_EXPORT') || 
+              (doc.type === 'INVOICE' && (
+                (doc.subType === 'EXPORT') || 
+                (typeof doc.subType === 'undefined' && doc.fileName.toLowerCase().includes('export'))
+              ))) && 
+             doc.relatedBolId === bolId
+  );
+  console.log('Export invoices filtered:', invoicesExport.map(doc => ({
+    id: doc._id,
+    type: doc.type,
+    subType: doc.subType || 'MISSING',
+    hasSubType: doc.hasOwnProperty('subType'),
+    fileName: doc.fileName
+  })));
+  
+  // Finally, ensure real invoices don't include any that might be exports
+  const invoices = existingDocuments.filter(
+    (doc) => doc.type === 'INVOICE' && 
+             doc.subType !== 'EXPORT' &&
+             !doc.fileName.toLowerCase().includes('export') && 
+             doc.relatedBolId === bolId
+  );
+  console.log('Regular invoices filtered:', invoices.map(doc => ({
+    id: doc._id,
+    type: doc.type,
+    subType: doc.subType || 'MISSING',
+    hasSubType: doc.hasOwnProperty('subType'),
+    fileName: doc.fileName
+  })));
   const coas = existingDocuments.filter(
     (doc) => doc.type === 'COA' && doc.relatedBolId === bolId
-  )
+  );
   // SED is a single document per BOL
   const existingSED = existingDocuments.find(
     (doc) => doc.type === 'SED' && doc.relatedBolId === bolId
@@ -513,7 +587,16 @@ export function RelatedDocuments({
       // Create form data for upload
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('type', type);
+      
+      // Use INVOICE instead of INVOICE_EXPORT to avoid validation errors
+      const uploadType = type === 'INVOICE_EXPORT' ? 'INVOICE' : type;
+      formData.append('type', uploadType);
+      
+      // Add subType for export invoices
+      if (type === 'INVOICE_EXPORT') {
+        formData.append('subType', 'EXPORT');
+      }
+      
       formData.append('relatedBolId', bolId);
       
       // Upload the document
@@ -614,7 +697,16 @@ export function RelatedDocuments({
         // Create form data for each file
         const formData = new FormData();
         formData.append('file', file);
-        formData.append('type', type);
+        
+        // Use INVOICE instead of INVOICE_EXPORT to avoid validation errors
+        const uploadType = type === 'INVOICE_EXPORT' ? 'INVOICE' : type;
+        formData.append('type', uploadType);
+        
+        // Add subType for export invoices
+        if (type === 'INVOICE_EXPORT') {
+          formData.append('subType', 'EXPORT');
+        }
+        
         formData.append('relatedBolId', bolId);
         
         try {
@@ -841,62 +933,185 @@ export function RelatedDocuments({
       <div className="space-y-4">
         {/* Only show documents that exist on mobile, or all on desktop */}
         {(existingPL || !isMobile) && (
-          <div className="flex flex-col space-y-2">
-            <p className="font-medium">{existingPL ? 'Packing List' : 'Add Packing List'}</p>
-            {renderDocumentButton('PL')}
+          <div className="flex flex-col space-y-2 border-b pb-3">
+            <div 
+              className="flex justify-between items-center cursor-pointer" 
+              onClick={() => toggleSection('PL')}
+            >
+              <p className="font-medium">{existingPL ? 'Packing List' : 'Add Packing List'}</p>
+              {expandedSections['PL'] ? 
+                <ChevronUp className="h-5 w-5 text-gray-500" /> : 
+                <ChevronDown className="h-5 w-5 text-gray-500" />
+              }
+            </div>
+            {expandedSections['PL'] && renderDocumentButton('PL')}
           </div>
         )}
         
         {(existingCOO || !isMobile) && (
-          <div className="flex flex-col space-y-2">
-            <p className="font-medium">{existingCOO ? 'Certificate of Origin' : 'Add Certificate of Origin'}</p>
-            {renderDocumentButton('COO')}
+          <div className="flex flex-col space-y-2 border-b pb-3">
+            <div 
+              className="flex justify-between items-center cursor-pointer" 
+              onClick={() => toggleSection('COO')}
+            >
+              <p className="font-medium">{existingCOO ? 'Certificate of Origin' : 'Add Certificate of Origin'}</p>
+              {expandedSections['COO'] ? 
+                <ChevronUp className="h-5 w-5 text-gray-500" /> : 
+                <ChevronDown className="h-5 w-5 text-gray-500" />
+              }
+            </div>
+            {expandedSections['COO'] && renderDocumentButton('COO')}
           </div>
         )}
 
         {/* Multiple document type sections */}
         {(invoicesExport.length > 0 || !isMobile) && (
-          <div className="flex flex-col space-y-2">
-            <p className="font-medium">{invoicesExport.length > 0 ? `Invoices for Export (${invoicesExport.length})` : 'Add Invoices for Export'}</p>
-            {renderMultipleDocumentsSection('INVOICE_EXPORT', 'Invoice for Export', invoicesExport, uploadingInvoiceExport)}
+          <div className="flex flex-col space-y-2 border-b pb-3">
+            <div 
+              className="flex justify-between items-center cursor-pointer" 
+              onClick={() => toggleSection('INVOICE_EXPORT')}
+            >
+              <div className="flex justify-between items-center w-full">
+                <p className="font-medium">{invoicesExport.length > 0 ? `Invoices for Export (${invoicesExport.length})` : 'Add Invoices for Export'}</p>
+                <div className="flex items-center space-x-2">
+                  {/* Upload button next to the section title */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="hidden sm:flex items-center mr-2"
+                    onClick={(e) => {
+                      e.stopPropagation(); // Prevent section toggle
+                      handleMultipleUpload('INVOICE_EXPORT');
+                    }}
+                    disabled={uploadingInvoiceExport || (uploadingMultiple && multipleUploadType === 'INVOICE_EXPORT')}
+                  >
+                    {(uploadingMultiple && multipleUploadType === 'INVOICE_EXPORT') || uploadingInvoiceExport ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <FilePlus className="mr-2 h-4 w-4" />
+                    )}
+                    Upload {invoicesExport.length > 0 ? "(more)" : ""}
+                  </Button>
+                  {expandedSections['INVOICE_EXPORT'] ? 
+                    <ChevronUp className="h-5 w-5 text-gray-500" /> : 
+                    <ChevronDown className="h-5 w-5 text-gray-500" />
+                  }
+                </div>
+              </div>
+            </div>
+            {/* Only render the document list for existing documents when expanded */}
+            {expandedSections['INVOICE_EXPORT'] && invoicesExport.length > 0 && (
+              <div className="space-y-2">
+                {invoicesExport.map((doc) => (
+                  <div key={doc._id} className="flex flex-col sm:flex-row gap-2 w-full">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full justify-start"
+                      onClick={() => window.open(`/api/documents/download/${doc._id}`, '_blank')}
+                    >
+                      <FileText className="mr-2 h-4 w-4" />
+                      View Invoice for Export {doc.fileName.split('.')[0]}
+                    </Button>
+                    
+                    {/* Delete button - hidden on mobile */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="hidden sm:flex w-full justify-start sm:w-auto text-red-500 hover:text-red-700"
+                      onClick={() => confirmDeleteDocument(doc)}
+                      disabled={uploadingInvoiceExport || (uploadingMultiple && multipleUploadType === 'INVOICE_EXPORT')}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
         
         {(invoices.length > 0 || !isMobile) && (
-          <div className="flex flex-col space-y-2">
-            <p className="font-medium">{invoices.length > 0 ? `Real Invoices (${invoices.length})` : 'Add Real Invoices'}</p>
-            {renderMultipleDocumentsSection('INVOICE', 'Real Invoice', invoices, uploadingInvoice)}
+          <div className="flex flex-col space-y-2 border-b pb-3">
+            <div 
+              className="flex justify-between items-center cursor-pointer" 
+              onClick={() => toggleSection('INVOICE')}
+            >
+              <p className="font-medium">{invoices.length > 0 ? `Real Invoices (${invoices.length})` : 'Add Real Invoices'}</p>
+              {expandedSections['INVOICE'] ? 
+                <ChevronUp className="h-5 w-5 text-gray-500" /> : 
+                <ChevronDown className="h-5 w-5 text-gray-500" />
+              }
+            </div>
+            {expandedSections['INVOICE'] && renderMultipleDocumentsSection('INVOICE', 'Real Invoice', invoices, uploadingInvoice)}
           </div>
         )}
         
         {(coas.length > 0 || !isMobile) && (
-          <div className="flex flex-col space-y-2">
-            <p className="font-medium">{coas.length > 0 ? `Certificates of Analysis (${coas.length})` : 'Add Certificates of Analysis'}</p>
-            {renderMultipleDocumentsSection('COA', 'Certificate of Analysis', coas, uploadingCOA)}
+          <div className="flex flex-col space-y-2 border-b pb-3">
+            <div 
+              className="flex justify-between items-center cursor-pointer" 
+              onClick={() => toggleSection('COA')}
+            >
+              <p className="font-medium">{coas.length > 0 ? `Certificates of Analysis (${coas.length})` : 'Add Certificates of Analysis'}</p>
+              {expandedSections['COA'] ? 
+                <ChevronUp className="h-5 w-5 text-gray-500" /> : 
+                <ChevronDown className="h-5 w-5 text-gray-500" />
+              }
+            </div>
+            {expandedSections['COA'] && renderMultipleDocumentsSection('COA', 'Certificate of Analysis', coas, uploadingCOA)}
           </div>
         )}
         
         {/* SED - Single document per BOL */}
         {(existingSED || !isMobile) && (
-          <div className="flex flex-col space-y-2">
-            <p className="font-medium">{existingSED ? 'Shipper\'s Export Declaration (SED)' : 'Add Shipper\'s Export Declaration (SED)'}</p>
-            {renderMultipleDocumentsSection('SED', 'SED', existingSED ? [existingSED] : [], uploadingSED)}
+          <div className="flex flex-col space-y-2 border-b pb-3">
+            <div 
+              className="flex justify-between items-center cursor-pointer" 
+              onClick={() => toggleSection('SED')}
+            >
+              <p className="font-medium">{existingSED ? 'Shipper\'s Export Declaration (SED)' : 'Add Shipper\'s Export Declaration (SED)'}</p>
+              {expandedSections['SED'] ? 
+                <ChevronUp className="h-5 w-5 text-gray-500" /> : 
+                <ChevronDown className="h-5 w-5 text-gray-500" />
+              }
+            </div>
+            {expandedSections['SED'] && renderMultipleDocumentsSection('SED', 'SED', existingSED ? [existingSED] : [], uploadingSED)}
           </div>
         )}
         
         {/* Multiple data sheets */}
         {(dataSheets.length > 0 || !isMobile) && (
-          <div className="flex flex-col space-y-2">
-            <p className="font-medium">{dataSheets.length > 0 ? `Product Data Sheets (${dataSheets.length})` : 'Add Product Data Sheets'}</p>
-            {renderMultipleDocumentsSection('DATA_SHEET', 'Product Data Sheet', dataSheets, uploadingDataSheet)}
+          <div className="flex flex-col space-y-2 border-b pb-3">
+            <div 
+              className="flex justify-between items-center cursor-pointer" 
+              onClick={() => toggleSection('DATA_SHEET')}
+            >
+              <p className="font-medium">{dataSheets.length > 0 ? `Product Data Sheets (${dataSheets.length})` : 'Add Product Data Sheets'}</p>
+              {expandedSections['DATA_SHEET'] ? 
+                <ChevronUp className="h-5 w-5 text-gray-500" /> : 
+                <ChevronDown className="h-5 w-5 text-gray-500" />
+              }
+            </div>
+            {expandedSections['DATA_SHEET'] && renderMultipleDocumentsSection('DATA_SHEET', 'Product Data Sheet', dataSheets, uploadingDataSheet)}
           </div>
         )}
         
         {/* Multiple safety sheets */}
         {(safetySheets.length > 0 || !isMobile) && (
-          <div className="flex flex-col space-y-2">
-            <p className="font-medium">{safetySheets.length > 0 ? `Product Safety Sheets (${safetySheets.length})` : 'Add Product Safety Sheets'}</p>
-            {renderMultipleDocumentsSection('SAFETY_SHEET', 'Product Safety Sheet', safetySheets, uploadingSafetySheet)}
+          <div className="flex flex-col space-y-2 border-b pb-3">
+            <div 
+              className="flex justify-between items-center cursor-pointer" 
+              onClick={() => toggleSection('SAFETY_SHEET')}
+            >
+              <p className="font-medium">{safetySheets.length > 0 ? `Product Safety Sheets (${safetySheets.length})` : 'Add Product Safety Sheets'}</p>
+              {expandedSections['SAFETY_SHEET'] ? 
+                <ChevronUp className="h-5 w-5 text-gray-500" /> : 
+                <ChevronDown className="h-5 w-5 text-gray-500" />
+              }
+            </div>
+            {expandedSections['SAFETY_SHEET'] && renderMultipleDocumentsSection('SAFETY_SHEET', 'Product Safety Sheet', safetySheets, uploadingSafetySheet)}
           </div>
         )}
 

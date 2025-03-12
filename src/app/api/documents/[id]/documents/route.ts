@@ -11,6 +11,7 @@ interface MongoDocument {
   fileName: string
   fileId: Types.ObjectId
   type: 'BOL' | 'PL' | 'COO' | 'INVOICE_EXPORT' | 'INVOICE' | 'COA' | 'SED' | 'DATA_SHEET' | 'SAFETY_SHEET'
+  subType?: string
   relatedBolId?: Types.ObjectId
   createdAt: Date
   updatedAt: Date
@@ -84,6 +85,7 @@ export async function GET(
       fileName: doc.fileName,
       fileId: doc.fileId.toString(),
       type: doc.type,
+      subType: doc.subType,
       relatedBolId: doc.relatedBolId?.toString(),
       createdAt: doc.createdAt.toISOString(),
       updatedAt: doc.updatedAt.toISOString(),

@@ -5,6 +5,7 @@ export interface IDocument {
   fileName: string
   fileId: mongoose.Types.ObjectId  // GridFS file ID
   type: 'BOL' | 'PL' | 'COO' | 'INVOICE_EXPORT' | 'INVOICE' | 'COA' | 'SED' | 'DATA_SHEET' | 'SAFETY_SHEET'  // Document types
+  subType?: string  // Used to distinguish between different subtypes (e.g., 'EXPORT' for invoices)
   relatedBolId?: mongoose.Types.ObjectId  // Reference to original BOL document
   packingListData?: {
     documentNumber: string  // e.g. "1092-PL"
@@ -92,6 +93,10 @@ const documentSchema = new mongoose.Schema<IDocument>({
     type: String,
     enum: ['BOL', 'PL', 'COO', 'INVOICE_EXPORT', 'INVOICE', 'COA', 'SED', 'DATA_SHEET', 'SAFETY_SHEET'],
     required: true
+  },
+  subType: {
+    type: String,
+    required: false
   },
   relatedBolId: {
     type: mongoose.Schema.Types.ObjectId,

@@ -212,20 +212,125 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Get the uploaded file and clientId
+    // Get the uploaded file and form data
     const formData = await request.formData()
     const file = formData.get('file') as File
+    const type = formData.get('type') as string
+    const relatedBolId = formData.get('relatedBolId') as string
+    const subType = formData.get('subType') as string | null
+    
+    // For BOL uploads, we need clientId and bolNumber
     const clientId = formData.get('clientId') as string
     const bolNumber = formData.get('bolNumber') as string
     
-    if (!file || !clientId || !bolNumber) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+    // Validate required fields based on document type
+    if (!file) {
+      return NextResponse.json({ error: 'Missing file' }, { status: 400 })
+    }
+    
+    if (type === 'BOL' && (!clientId || !bolNumber)) {
+      return NextResponse.json({ error: 'Missing required fields for BOL upload' }, { status: 400 })
+    }
+    
+    if (type !== 'BOL' && !relatedBolId) {
+      return NextResponse.json({ error: 'Missing relatedBolId for related document' }, { status: 400 })
     }
 
     await connectDB()
+    
+    let documentClientId = clientId;
+    
+    // If this is a related document, get the client ID from the related BOL
+    if (relatedBolId && !clientId) {
+      const relatedBol = await Document.findById(relatedBolId);
+      if (!relatedBol) {
+        return NextResponse.json({ error: 'Related BOL not found' }, { status: 404 })
+      }
+      documentClientId = relatedBol.clientId.toString();
+    }
 
+    // For related documents, we don't need client verification
+    if (type !== 'BOL') {
+      try {
+        console.log('Uploading related document:', {
+          type,
+          relatedBolId,
+          documentClientId
+        });
+        
+        // Upload related document directly
+        const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db!, {
+          bucketName: 'documents'
+        })
+
+        // Convert File to Buffer
+        const arrayBuffer = await file.arrayBuffer()
+        const buffer = Buffer.from(arrayBuffer)
+
+        // Upload file to GridFS
+        const uploadStream = bucket.openUploadStream(file.name, {
+          contentType: file.type,
+          metadata: {
+            clientId: documentClientId,
+            uploadedBy: session.user?.email,
+            uploadedAt: new Date().toISOString(),
+            fileName: file.name,
+            documentType: type,
+            relatedBolId: relatedBolId
+          }
+        })
+
+        await new Promise((resolve, reject) => {
+          const readStream = require('stream').Readable.from(buffer)
+          readStream.pipe(uploadStream)
+            .on('error', reject)
+            .on('finish', resolve)
+        })
+
+        console.log('File uploaded to GridFS, creating document record with type:', type);
+        
+        // Create document record for related document
+        const documentData = {
+          clientId: documentClientId,
+          fileName: file.name,
+          fileId: uploadStream.id,
+          type: type === 'INVOICE_EXPORT' ? 'INVOICE' : type,
+          relatedBolId: new mongoose.Types.ObjectId(relatedBolId),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          subType: subType || (type === 'INVOICE_EXPORT' ? 'EXPORT' : undefined)
+        };
+        
+        console.log('Document data:', JSON.stringify(documentData));
+        
+        // Force the type to be one of the enum values if needed
+        // This is a temporary fix if the model validation is too strict
+        if (!['BOL', 'PL', 'COO', 'INVOICE_EXPORT', 'INVOICE', 'COA', 'SED', 'DATA_SHEET', 'SAFETY_SHEET'].includes(type)) {
+          console.warn(`Invalid document type: ${type}, defaulting to 'BOL'`);
+          documentData.type = 'BOL';
+        }
+        
+        const newDocument = await Document.create(documentData);
+        
+        console.log('Document created successfully:', newDocument._id);
+
+        return NextResponse.json({
+          success: true,
+          document: {
+            _id: newDocument._id,
+            fileName: newDocument.fileName,
+            type: newDocument.type
+          }
+        })
+      } catch (error) {
+        console.error('Error in related document upload:', error);
+        throw error;
+      }
+    }
+    
+    // If we reach here, this is a BOL upload, continue with the existing BOL processing
     // Get the selected client's details
-    const selectedClient = await Client.findById(clientId).lean() as unknown as ClientDocument
+    const selectedClient = await Client.findById(documentClientId).lean() as unknown as ClientDocument
     if (!selectedClient) {
       return NextResponse.json({ error: 'Selected client not found' }, { status: 400 })
     }
@@ -310,7 +415,7 @@ export async function POST(request: NextRequest) {
 
     // Verify the consignee matches the selected client
     const consignee = claudeData.parties.consignee
-    const verificationResult = await verifyClientMatch(consignee, clientId);
+    const verificationResult = await verifyClientMatch(consignee, documentClientId);
     
     if (!verificationResult.isMatch) {
       const errorMessage = verificationResult.matchedClient 
@@ -334,13 +439,13 @@ export async function POST(request: NextRequest) {
 
     // Check if we already have a document with this BOL number
     const existingDoc = await Document.findOne({ 
-      'bolData.bolNumber': bolNumber,
+      'bolData.bolNumber': claudeData.shipmentDetails.bolNumber,
       type: 'BOL'
     })
 
     // If we have an existing document, update it
     if (existingDoc) {
-      console.log('Updating existing document for BOL:', bolNumber)
+      console.log('Updating existing document for BOL:', claudeData.shipmentDetails.bolNumber)
       existingDoc.updatedAt = new Date()
       existingDoc.bolData = {
         ...claudeData.shipmentDetails,
@@ -369,11 +474,12 @@ export async function POST(request: NextRequest) {
     const uploadStream = bucket.openUploadStream(file.name, {
       contentType: file.type,
       metadata: {
-        clientId,
+        clientId: documentClientId,
         bolNumber,
         uploadedBy: session.user?.email,
         uploadedAt: new Date().toISOString(),
-        fileName: file.name
+        fileName: file.name,
+        relatedBolId: relatedBolId
       }
     })
 
@@ -386,7 +492,7 @@ export async function POST(request: NextRequest) {
 
     // Create new document record with Claude's extracted data
     const newDocument = await Document.create({
-      clientId,
+      clientId: documentClientId,
       fileName: file.name,
       fileId: uploadStream.id,
       type: 'BOL',
