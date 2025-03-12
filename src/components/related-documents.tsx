@@ -64,6 +64,28 @@ export function RelatedDocuments({
     date: '',
     poNumber: ''
   })
+  
+  // Add state to track screen size
+  const [isMobile, setIsMobile] = useState(false)
+  
+  // Set up effect to track screen size
+  useEffect(() => {
+    // Function to update the isMobile state
+    const checkIsMobile = () => {
+      setIsMobile(window.innerWidth < 640) // 640px is the sm breakpoint in Tailwind
+    }
+    
+    // Set initial value
+    checkIsMobile()
+    
+    // Add event listener
+    window.addEventListener('resize', checkIsMobile)
+    
+    // Clean up
+    return () => {
+      window.removeEventListener('resize', checkIsMobile)
+    }
+  }, [])
 
   // Validate bolId on component mount
   useEffect(() => {
@@ -308,7 +330,7 @@ export function RelatedDocuments({
     }
   };
 
-  // Modify renderDocumentButton to include Edit button for PL
+  // Modify renderDocumentButton to be mobile-friendly and view-focused on small screens
   const renderDocumentButton = (type: 'PL' | 'COO') => {
     const exists = type === 'PL' 
       ? existingPL 
@@ -323,66 +345,44 @@ export function RelatedDocuments({
       : 'Certificate of Origin';
 
     if (exists) {
-      // For COO documents, use the same button pattern as other documents
-      if (type === 'COO') {
-        return (
-          <div className="flex space-x-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => window.open(`/api/documents/${exists._id}/view`, '_blank')}
-            >
-              <FileText className="mr-2 h-4 w-4" />
-              View {label}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => openConfirmDialog(type)}
-              disabled={isGenerating || !bolId}
-            >
-              {isGenerating ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <FilePlus className="mr-2 h-4 w-4" />
-              )}
-              Regenerate
-            </Button>
-          </div>
-        );
-      }
-      
-      // For Packing List, add Edit button next to View and Regenerate
+      // For both COO and PL, use mobile-friendly layout with View-only on mobile
       return (
-        <div className="flex space-x-2">
+        <div className="flex flex-col sm:flex-row gap-2 w-full">
           <Button
             variant="outline"
             size="sm"
-            onClick={() => window.open(`/api/documents/download/${exists._id}`, '_blank')}
+            className="w-full justify-start"
+            onClick={() => window.open(`/api/documents/${type === 'COO' ? exists._id + '/view' : 'download/' + exists._id}`, '_blank')}
           >
             <FileText className="mr-2 h-4 w-4" />
             View {label}
           </Button>
+          
+          {/* Edit button - hidden on mobile */}
           {type === 'PL' && (
             <Button
               variant="outline"
               size="sm"
+              className="hidden sm:flex w-full justify-start sm:w-auto"
               onClick={() => handleOpenEditDialog(exists)}
             >
               <Edit className="mr-2 h-4 w-4" />
               Edit
             </Button>
           )}
+          
+          {/* Regenerate button - hidden on mobile */}
           <Button
             variant="outline"
             size="sm"
+            className="hidden sm:flex w-full justify-start sm:w-auto"
             onClick={() => openConfirmDialog(type)}
             disabled={isGenerating || !bolId}
           >
             {isGenerating ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
-              <FilePlus className="mr-2 h-4 w-4" />
+              <RefreshCw className="mr-2 h-4 w-4" />
             )}
             Regenerate
           </Button>
@@ -390,10 +390,12 @@ export function RelatedDocuments({
       );
     }
 
+    // For non-existent documents, hide the Generate button on mobile
     return (
       <Button
         variant="outline"
         size="sm"
+        className="hidden sm:flex w-full justify-start sm:w-auto"
         onClick={() => openConfirmDialog(type)}
         disabled={isGenerating || !bolId}
       >
@@ -415,18 +417,31 @@ export function RelatedDocuments({
   return (
     <div className="mt-4 space-y-4 border rounded-md p-4">
       <h3 className="text-lg font-semibold">Related Documents</h3>
-      <div className="space-y-2">
-        <div className="flex justify-between items-center">
-          <span>Packing List</span>
-          {renderDocumentButton('PL')}
-        </div>
-        <div className="flex justify-between items-center">
-          <span>Certificate of Origin</span>
-          {renderDocumentButton('COO')}
-        </div>
+      <div className="space-y-4">
+        {/* Only show documents that exist on mobile, or all on desktop */}
+        {(existingPL || !isMobile) && (
+          <div className="flex flex-col space-y-2">
+            <p className="font-medium">{existingPL ? 'Packing List' : 'Add Packing List'}</p>
+            {renderDocumentButton('PL')}
+          </div>
+        )}
+        
+        {(existingCOO || !isMobile) && (
+          <div className="flex flex-col space-y-2">
+            <p className="font-medium">{existingCOO ? 'Certificate of Origin' : 'Add Certificate of Origin'}</p>
+            {renderDocumentButton('COO')}
+          </div>
+        )}
+
+        {/* Add a message when no documents exist on mobile */}
+        {!existingPL && !existingCOO && isMobile && (
+          <p className="text-sm text-muted-foreground">
+            No related documents available. Use desktop or tablet view to create documents.
+          </p>
+        )}
       </div>
 
-      {/* Remove the card editor and replace with a dialog */}
+      {/* Dialog remains unchanged */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
         <DialogContent>
           <DialogHeader>

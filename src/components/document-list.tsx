@@ -474,7 +474,7 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
             <input
               type="text"
               placeholder="Search by BOL Number, Date, or Carrier's Reference..."
-              className="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base placeholder:text-xs sm:placeholder:text-sm"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -522,38 +522,38 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
         return (
           <Card key={bolNumber} className="mb-4">
             <CardHeader 
-              className="cursor-pointer hover:bg-muted transition-colors"
+              className="cursor-pointer hover:bg-muted transition-colors py-3 sm:py-6"
               onClick={() => toggleCardExpansion(bolNumber)}
             >
               <div className="flex justify-between items-start">
                 <div className="flex flex-col space-y-1">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <CardTitle className="text-lg font-bold">BOL: {bolNumber}</CardTitle>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CardTitle className="text-base sm:text-lg font-bold">BOL: {bolNumber}</CardTitle>
                     {bolDoc && bolDoc.bolData?.dateOfIssue && (
-                      <span className="inline-flex items-center text-sm font-medium bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 px-2 py-1 rounded">
-                        <Calendar className="h-3 w-3 mr-1" />
+                      <span className="inline-flex items-center text-xs sm:text-sm font-medium bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded">
+                        <Calendar className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-1" />
                         {formatDateDisplay(bolDoc.bolData.dateOfIssue)}
                       </span>
                     )}
                     {bolDoc && bolDoc.bolData?.carrierReference && (
-                      <span className="inline-flex items-center text-sm font-medium bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 px-2 py-1 rounded">
-                        <FileText className="h-3 w-3 mr-1" />
+                      <span className="inline-flex items-center text-xs sm:text-sm font-medium bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded">
+                        <FileText className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-1" />
                         {bolDoc.bolData.carrierReference}
                       </span>
                     )}
                   </div>
                   {bolDoc && !bolDoc.bolData?.dateOfIssue && (
                     <span className="text-xs text-amber-600 dark:text-amber-400 flex items-center">
-                      <Calendar className="h-3 w-3 mr-1" />
+                      <Calendar className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-1" />
                       Missing date
                     </span>
                   )}
                 </div>
                 <div className="mt-1">
                   {isExpanded ? (
-                    <ChevronUp className="h-5 w-5" />
+                    <ChevronUp className="h-4 w-4 sm:h-5 sm:w-5" />
                   ) : (
-                    <ChevronDown className="h-5 w-5" />
+                    <ChevronDown className="h-4 w-4 sm:h-5 sm:w-5" />
                   )}
                 </div>
               </div>

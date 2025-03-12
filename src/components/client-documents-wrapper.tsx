@@ -154,15 +154,15 @@ export function ClientDocumentsWrapper({
     <div className='space-y-6'>
       <div className='flex items-center justify-between'>
         <div>
-          <div className='flex items-center gap-4'>
+          <div className='flex items-center gap-2 sm:gap-4'>
             <Link href='/dashboard/clients'>
-              <Button variant='outline' size='icon'>
-                <ArrowLeft className='h-4 w-4' />
+              <Button variant='outline' size='icon' className="h-8 w-8 sm:h-10 sm:w-10">
+                <ArrowLeft className='h-3 w-3 sm:h-4 sm:w-4' />
               </Button>
             </Link>
             <div>
-              <h1 className='text-3xl font-bold'>{client.name}</h1>
-              <p className='text-muted-foreground'>RIF: {client.rif}</p>
+              <h1 className='text-xl sm:text-2xl md:text-3xl font-bold truncate'>{client.name}</h1>
+              <p className='text-xs sm:text-sm text-muted-foreground'>RIF: {client.rif}</p>
             </div>
           </div>
         </div>
