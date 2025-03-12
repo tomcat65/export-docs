@@ -294,7 +294,7 @@ export async function POST(request: NextRequest) {
           clientId: documentClientId,
           fileName: file.name,
           fileId: uploadStream.id,
-          type: type === 'INVOICE_EXPORT' ? 'INVOICE' : type,
+          type: type,  // We'll handle type validation below
           relatedBolId: new mongoose.Types.ObjectId(relatedBolId),
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -305,9 +305,18 @@ export async function POST(request: NextRequest) {
         
         // Force the type to be one of the enum values if needed
         // This is a temporary fix if the model validation is too strict
-        if (!['BOL', 'PL', 'COO', 'INVOICE_EXPORT', 'INVOICE', 'COA', 'SED', 'DATA_SHEET', 'SAFETY_SHEET'].includes(type)) {
+        const validTypes = ['BOL', 'PL', 'COO', 'INVOICE_EXPORT', 'INVOICE', 'COA', 'SED', 'DATA_SHEET', 'SAFETY_SHEET'];
+        if (!validTypes.includes(type)) {
           console.warn(`Invalid document type: ${type}, defaulting to 'BOL'`);
           documentData.type = 'BOL';
+        }
+        
+        // Fix for INVOICE type
+        if (type === 'INVOICE') {
+          // Ensure we're using a valid enum value that matches the schema
+          documentData.type = 'INVOICE_EXPORT';
+          // Set subType to distinguish regular invoices from export invoices
+          documentData.subType = documentData.subType || 'REGULAR';
         }
         
         const newDocument = await Document.create(documentData);

@@ -794,7 +794,6 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
 
                     {/* Related Documents Section */}
                     <div>
-                      <h3 className="text-lg font-semibold mb-2">Related Documents</h3>
                       <RelatedDocuments
                         bolId={bolDoc._id}
                         bolNumber={bolNumber}
