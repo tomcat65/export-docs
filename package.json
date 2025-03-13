@@ -12,7 +12,12 @@
     "update-auth": "tsx scripts/update-auth-rules.ts",
     "cleanup-admins": "tsx scripts/cleanup-admins.ts",
     "cleanup-coo": "node scripts/cleanup-coo.js",
-    "cleanup-gridfs": "tsx scripts/cleanup-gridfs.ts"
+    "cleanup-gridfs": "tsx scripts/cleanup-gridfs.ts",
+    "backup": "node scripts/backup/backup-database.js",
+    "backup:daily": "node scripts/backup/backup-database.js daily",
+    "backup:weekly": "node scripts/backup/backup-database.js weekly",
+    "backup:monthly": "node scripts/backup/backup-database.js monthly",
+    "backup:scheduler": "node scripts/backup/schedule-backups.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.37.0",

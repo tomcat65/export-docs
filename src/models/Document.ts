@@ -4,7 +4,7 @@ export interface IDocument {
   clientId: mongoose.Types.ObjectId
   fileName: string
   fileId: mongoose.Types.ObjectId  // GridFS file ID
-  type: 'BOL' | 'PL' | 'COO' | 'INVOICE_EXPORT' | 'INVOICE' | 'COA' | 'SED' | 'DATA_SHEET' | 'SAFETY_SHEET'  // Document types
+  type: 'BOL' | 'PL' | 'COO' | 'INVOICE_EXPORT' | 'INVOICE' | 'COA' | 'SED' | 'DATA_SHEET' | 'SAFETY_SHEET' | 'INSURANCE'  // Document types
   subType?: string  // Used to distinguish between different subtypes (e.g., 'EXPORT' for invoices)
   relatedBolId?: mongoose.Types.ObjectId  // Reference to original BOL document
   packingListData?: {
@@ -75,6 +75,13 @@ export interface IDocument {
   updatedAt: Date
 }
 
+// Valid document types constant that can be used across the application
+export const VALID_DOCUMENT_TYPES = [
+  'BOL', 'PL', 'COO', 'INVOICE_EXPORT', 'INVOICE', 'COA', 'SED', 
+  'DATA_SHEET', 'SAFETY_SHEET', 'INSURANCE'
+] as const;
+
+// Define the document schema
 const documentSchema = new mongoose.Schema<IDocument>({
   clientId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -91,7 +98,7 @@ const documentSchema = new mongoose.Schema<IDocument>({
   },
   type: {
     type: String,
-    enum: ['BOL', 'PL', 'COO', 'INVOICE_EXPORT', 'INVOICE', 'COA', 'SED', 'DATA_SHEET', 'SAFETY_SHEET'],
+    enum: VALID_DOCUMENT_TYPES,
     required: true
   },
   subType: {
@@ -169,11 +176,14 @@ const documentSchema = new mongoose.Schema<IDocument>({
   }
 }, {
   timestamps: true
-})
+});
 
 // Create indexes
-documentSchema.index({ clientId: 1, type: 1 })
-documentSchema.index({ 'bolData.bolNumber': 1 })
-documentSchema.index({ relatedBolId: 1 })
+documentSchema.index({ clientId: 1, type: 1 });
+documentSchema.index({ 'bolData.bolNumber': 1 });
+documentSchema.index({ relatedBolId: 1 });
 
-export const Document = mongoose.models.Document || mongoose.model<IDocument>('Document', documentSchema) 
+// Create and export the model, safely handling HMR
+export const Document = mongoose.models.Document 
+  ? (mongoose.models.Document as mongoose.Model<IDocument>) 
+  : mongoose.model<IDocument>('Document', documentSchema); 

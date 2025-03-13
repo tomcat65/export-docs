@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth'
 import { connectDB } from '@/lib/db'
 import { Document } from '@/models/Document'
 import { Types } from 'mongoose'
+import { apiFetch } from '@/lib/api-utils'
 
 // Helper function to recursively convert ObjectIds to strings
 function serializeObjectIds(obj: any): any {
@@ -90,7 +91,8 @@ export async function GET(
 
 // Client-side code example
 async function checkDocument(documentId: string) {
-  const response = await fetch(`/api/documents/${documentId}/exists`);
+  // Use the new apiFetch helper which handles absolute URLs
+  const response = await apiFetch(`/api/documents/${documentId}/exists`);
   const data = await response.json();
   
   console.log('Document status:', data);
@@ -100,5 +102,5 @@ async function checkDocument(documentId: string) {
   }
 }
 
-// Call with your document ID
-checkDocument('67c958dc57bfddf075c9391a'); 
+// For testing purposes only - comment this out in production
+// checkDocument('67c958dc57bfddf075c9391a'); 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { connectDB } from '@/lib/db'
-import { Document } from '@/models/Document'
+import { Document, VALID_DOCUMENT_TYPES, IDocument } from '@/models/Document'
 import { Client } from '@/models/Client'
 import mongoose from 'mongoose'
 import { GridFSBucket } from 'mongodb'
@@ -27,6 +27,7 @@ interface ShipmentDetails {
   shipmentDate: string;
   totalContainers?: string;
   carrierReference?: string; // Fixed the field name to match the rest of the application
+  shipper?: string; // Added shipper property to match usage
 }
 
 interface ProcessedDocument {
@@ -52,6 +53,10 @@ interface ProcessedDocument {
     currency: string;
     freightTerms: string;
     itnNumber: string;
+    totalWeight?: { // Added totalWeight property to match usage
+      kg: string;
+      lbs: string;
+    };
   };
 }
 
@@ -305,8 +310,7 @@ export async function POST(request: NextRequest) {
         
         // Force the type to be one of the enum values if needed
         // This is a temporary fix if the model validation is too strict
-        const validTypes = ['BOL', 'PL', 'COO', 'INVOICE_EXPORT', 'INVOICE', 'COA', 'SED', 'DATA_SHEET', 'SAFETY_SHEET'];
-        if (!validTypes.includes(type)) {
+        if (!VALID_DOCUMENT_TYPES.includes(type as any)) {
           console.warn(`Invalid document type: ${type}, defaulting to 'BOL'`);
           documentData.type = 'BOL';
         }
@@ -319,18 +323,39 @@ export async function POST(request: NextRequest) {
           documentData.subType = documentData.subType || 'REGULAR';
         }
         
-        const newDocument = await Document.create(documentData);
-        
-        console.log('Document created successfully:', newDocument._id);
-
-        return NextResponse.json({
-          success: true,
-          document: {
-            _id: newDocument._id,
-            fileName: newDocument.fileName,
-            type: newDocument.type
+        try {
+          console.log('Creating document with final data:', JSON.stringify({
+            clientId: documentData.clientId,
+            type: documentData.type,
+            subType: documentData.subType,
+            relatedBolId: documentData.relatedBolId?.toString(),
+            fileName: documentData.fileName
+          }));
+          
+          const newDocument = await Document.create(documentData);
+          console.log('Document created successfully:', newDocument._id);
+          
+          return NextResponse.json({
+            success: true,
+            document: {
+              _id: newDocument._id,
+              fileName: newDocument.fileName,
+              type: newDocument.type
+            }
+          });
+        } catch (error) {
+          console.error('Error creating document:', error);
+          // Handle mongoose validation errors more explicitly
+          if (error && typeof error === 'object' && 'name' in error && error.name === 'ValidationError' && 'errors' in error) {
+            console.error('Validation error details:', error.errors);
+            // Type assertion for mongoose validation error
+            const validationError = error as { errors: Record<string, { message: string }> };
+            return NextResponse.json({
+              error: 'Document validation failed: ' + Object.values(validationError.errors).map(err => err.message).join(', ')
+            }, { status: 400 });
           }
-        })
+          throw error;
+        }
       } catch (error) {
         console.error('Error in related document upload:', error);
         throw error;
@@ -456,13 +481,33 @@ export async function POST(request: NextRequest) {
     if (existingDoc) {
       console.log('Updating existing document for BOL:', claudeData.shipmentDetails.bolNumber)
       existingDoc.updatedAt = new Date()
+      
+      // Create a bolData object that conforms to the schema
       existingDoc.bolData = {
-        ...claudeData.shipmentDetails,
+        bolNumber: claudeData.shipmentDetails.bolNumber,
+        bookingNumber: claudeData.shipmentDetails.bookingNumber,
+        shipper: claudeData.shipmentDetails.shipper || '',
+        carrierReference: claudeData.shipmentDetails.carrierReference,
+        vessel: claudeData.shipmentDetails.vesselName,
+        voyage: claudeData.shipmentDetails.voyageNumber,
+        portOfLoading: claudeData.shipmentDetails.portOfLoading,
+        portOfDischarge: claudeData.shipmentDetails.portOfDischarge,
+        dateOfIssue: claudeData.shipmentDetails.dateOfIssue,
+        totalContainers: claudeData.containers?.length?.toString() || '0',
+        totalWeight: {
+          kg: claudeData.commercial?.totalWeight?.kg || '0',
+          lbs: claudeData.commercial?.totalWeight?.lbs || '0'
+        }
+      }
+      
+      // Store additional extracted data in custom fields if needed
+      existingDoc.set('extractedData', {
         status: 'processed',
         containers: claudeData.containers,
         parties: claudeData.parties,
         commercial: claudeData.commercial
-      }
+      })
+      
       await existingDoc.save()
       
       return NextResponse.json({

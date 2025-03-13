@@ -4,6 +4,7 @@ import "./globals.css";
 import "../styles/print.css";
 import { Providers } from "./providers";
 import { Toaster } from '@/components/ui/toaster'
+import { BackupNotification } from '@/components/system/backup-notification'
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -20,6 +21,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className} suppressHydrationWarning>
+        <BackupNotification />
         <Providers>{children}</Providers>
         <Toaster />
       </body>

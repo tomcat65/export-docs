@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/use-toast'
@@ -56,6 +56,7 @@ export function RelatedDocuments({
   const [uploadingSED, setUploadingSED] = useState(false)
   const [uploadingDataSheet, setUploadingDataSheet] = useState(false)
   const [uploadingSafetySheet, setUploadingSafetySheet] = useState(false)
+  const [uploadingInsurance, setUploadingInsurance] = useState(false)
   const [uploadingMultiple, setUploadingMultiple] = useState(false)
   const [multipleUploadType, setMultipleUploadType] = useState<string | null>(null)
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -73,7 +74,8 @@ export function RelatedDocuments({
     'COA': false,
     'SED': false,
     'DATA_SHEET': false,
-    'SAFETY_SHEET': false
+    'SAFETY_SHEET': false,
+    'INSURANCE': false
   })
   
   // Add state to track if the entire Related Documents section is expanded
@@ -131,14 +133,6 @@ export function RelatedDocuments({
     }
   }, [bolId]);
 
-  // Check if documents already exist
-  const existingPL = existingDocuments.find(
-    (doc) => doc.type === 'PL' && doc.relatedBolId === bolId
-  )
-  const existingCOO = existingDocuments.find(
-    (doc) => doc.type === 'COO' && doc.relatedBolId === bolId
-  )
-  
   // Debug document data - full print of one document to see all fields
   if (existingDocuments.length > 0) {
     console.log('First document complete:', JSON.stringify(existingDocuments[0]));
@@ -199,19 +193,6 @@ export function RelatedDocuments({
     hasSubType: doc.hasOwnProperty('subType'),
     fileName: doc.fileName
   })));
-  const coas = existingDocuments.filter(
-    (doc) => doc.type === 'COA' && doc.relatedBolId === bolId
-  );
-  // SED is a single document per BOL
-  const existingSED = existingDocuments.find(
-    (doc) => doc.type === 'SED' && doc.relatedBolId === bolId
-  )
-  const dataSheets = existingDocuments.filter(
-    (doc) => doc.type === 'DATA_SHEET' && doc.relatedBolId === bolId
-  )
-  const safetySheets = existingDocuments.filter(
-    (doc) => doc.type === 'SAFETY_SHEET' && doc.relatedBolId === bolId
-  )
 
   const handleGenerateDocument = async (type: 'PL' | 'COO', mode: 'new' | 'overwrite') => {
     try {
@@ -303,8 +284,8 @@ export function RelatedDocuments({
     }
     
     const exists = type === 'PL' 
-      ? existingPL 
-      : existingCOO;
+      ? plDocuments.length > 0
+      : cooDocuments.length > 0;
         
     if (exists) {
       setConfirmDialog({
@@ -443,85 +424,61 @@ export function RelatedDocuments({
 
   // Modify renderDocumentButton to be mobile-friendly and view-focused on small screens
   const renderDocumentButton = (type: 'PL' | 'COO') => {
-    const exists = type === 'PL' 
-      ? existingPL 
-      : existingCOO;
-        
-    const isGenerating = type === 'PL' 
-      ? generatingPL 
-      : generatingCOO;
-        
-    const label = type === 'PL' 
-      ? 'Packing List' 
-      : 'Certificate of Origin';
-
-    if (exists) {
-      // For both COO and PL, use mobile-friendly layout with View-only on mobile
-      return (
-        <div className="flex flex-col sm:flex-row gap-2 w-full">
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full justify-start overflow-hidden"
-            onClick={() => window.open(`/api/documents/${type === 'COO' ? exists._id + '/view' : 'download/' + exists._id}`, '_blank')}
-          >
-            <FileText className="mr-2 h-4 w-4 flex-shrink-0" />
-            {isMobile ? (
-              <span className="truncate">{exists.fileName}</span>
-            ) : (
-              <span className="truncate">View {label}</span>
-            )}
-          </Button>
-          
-          {/* Edit button - hidden on mobile */}
-          {type === 'PL' && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="hidden sm:flex w-full justify-start sm:w-auto"
-              onClick={() => handleOpenEditDialog(exists)}
-            >
-              <Edit className="mr-2 h-4 w-4" />
-              Edit
-            </Button>
+    const docArray = type === 'PL' ? plDocuments : cooDocuments;
+    const exists = docArray.length > 0;
+    const label = type === 'PL' ? 'Packing List' : 'Certificate of Origin';
+    
+    if (!exists) return null;
+    
+    // Find the first document of the correct type
+    const doc = docArray[0];
+    
+    return (
+      <div className="flex flex-col sm:flex-row gap-2 w-full">
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full justify-start overflow-hidden"
+          onClick={() => window.open(`/api/documents/${type === 'COO' ? doc._id + '/view' : 'download/' + doc._id}`, '_blank')}
+        >
+          <FileText className="mr-2 h-4 w-4 flex-shrink-0" />
+          {isMobile ? (
+            <span className="truncate">{doc.fileName}</span>
+          ) : (
+            <span className="truncate">View {label}</span>
           )}
-          
-          {/* Regenerate button - hidden on mobile */}
+        </Button>
+        
+        {/* Edit button - hidden on mobile */}
+        {type === 'PL' && (
           <Button
             variant="outline"
             size="sm"
             className="hidden sm:flex w-full justify-start sm:w-auto"
-            onClick={() => openConfirmDialog(type)}
-            disabled={isGenerating || !bolId}
+            onClick={() => handleOpenEditDialog(doc)}
           >
-            {isGenerating ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Regenerate
+            <Edit className="mr-2 h-4 w-4" />
+            Edit
           </Button>
-        </div>
-      );
-    }
-
-    // For non-existent documents, hide the Generate button on mobile
-    return (
-      <Button
-        variant="outline"
-        size="sm"
-        className="hidden sm:flex w-full justify-start sm:w-auto"
-        onClick={() => openConfirmDialog(type)}
-        disabled={isGenerating || !bolId}
-      >
-        {isGenerating ? (
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-        ) : (
-          <FilePlus className="mr-2 h-4 w-4" />
         )}
-        Generate {label}
-      </Button>
-    )
+        
+        {/* Regenerate button - hidden on mobile */}
+        <Button
+          variant="outline"
+          size="sm"
+          className="hidden sm:flex w-full justify-start sm:w-auto"
+          onClick={() => openConfirmDialog(type)}
+          disabled={generatingPL || generatingCOO || !bolId}
+        >
+          {generatingPL || generatingCOO ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="mr-2 h-4 w-4" />
+          )}
+          Regenerate
+        </Button>
+      </div>
+    );
   }
 
   // Function to handle document upload
@@ -546,8 +503,11 @@ export function RelatedDocuments({
       case 'SAFETY_SHEET':
         setUploadingSafetySheet(true);
         break;
+      case 'INSURANCE':
+        setUploadingInsurance(true);
+        break;
     }
-
+    
     try {
       // Create a file input element
       const fileInput = document.createElement('input');
@@ -592,6 +552,9 @@ export function RelatedDocuments({
             break;
           case 'SAFETY_SHEET':
             setUploadingSafetySheet(false);
+            break;
+          case 'INSURANCE':
+            setUploadingInsurance(false);
             break;
         }
         return;
@@ -649,7 +612,7 @@ export function RelatedDocuments({
         variant: 'destructive',
       });
     } finally {
-      // Reset loading state
+      // Reset loading state based on document type
       switch (type) {
         case 'INVOICE_EXPORT':
           setUploadingInvoiceExport(false);
@@ -668,6 +631,9 @@ export function RelatedDocuments({
           break;
         case 'SAFETY_SHEET':
           setUploadingSafetySheet(false);
+          break;
+        case 'INSURANCE':
+          setUploadingInsurance(false);
           break;
       }
     }
@@ -960,6 +926,16 @@ export function RelatedDocuments({
     return null;
   }
 
+  const cooDocuments = useMemo(() => existingDocuments.filter(doc => doc.type === 'COO'), [existingDocuments])
+  const plDocuments = useMemo(() => existingDocuments.filter(doc => doc.type === 'PL'), [existingDocuments])
+  const invoiceExportDocuments = useMemo(() => existingDocuments.filter(doc => doc.type === 'INVOICE_EXPORT' && doc.subType === 'EXPORT'), [existingDocuments])
+  const invoiceDocuments = useMemo(() => existingDocuments.filter(doc => doc.type === 'INVOICE_EXPORT' && doc.subType === 'REGULAR'), [existingDocuments])
+  const coas = useMemo(() => existingDocuments.filter(doc => doc.type === 'COA'), [existingDocuments])
+  const seds = useMemo(() => existingDocuments.filter(doc => doc.type === 'SED'), [existingDocuments])
+  const dataSheets = useMemo(() => existingDocuments.filter(doc => doc.type === 'DATA_SHEET'), [existingDocuments])
+  const safetySheets = useMemo(() => existingDocuments.filter(doc => doc.type === 'SAFETY_SHEET'), [existingDocuments])
+  const insuranceDocuments = useMemo(() => existingDocuments.filter(doc => doc.type === 'INSURANCE'), [existingDocuments])
+  
   return (
     <div className="mt-4 space-y-4 border rounded-md p-4">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
@@ -972,16 +948,14 @@ export function RelatedDocuments({
         </div>
         <div className="flex flex-wrap gap-1.5 text-xs w-full sm:w-auto">
           <span 
-            className={`px-1.5 py-1 rounded cursor-pointer ${existingPL ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'} hover:opacity-80`}
+            className={`px-1.5 py-1 rounded cursor-pointer ${plDocuments.length > 0 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'} hover:opacity-80`}
             onClick={() => {
               if (!relatedDocumentsExpanded) setRelatedDocumentsExpanded(true);
               setExpandedSections(prev => ({...prev, 'PL': true}));
-              // Use setTimeout to allow the section to expand before scrolling
               setTimeout(() => {
                 const element = document.querySelector('[data-section="PL"]');
                 if (element) {
                   element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                  // Add an extra scroll to provide padding at the top
                   window.scrollBy({ top: -20, behavior: 'smooth' });
                 }
               }, 100);
@@ -990,7 +964,7 @@ export function RelatedDocuments({
             PL
           </span>
           <span 
-            className={`px-1.5 py-1 rounded cursor-pointer ${existingCOO ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'} hover:opacity-80`}
+            className={`px-1.5 py-1 rounded cursor-pointer ${cooDocuments.length > 0 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'} hover:opacity-80`}
             onClick={() => {
               if (!relatedDocumentsExpanded) setRelatedDocumentsExpanded(true);
               setExpandedSections(prev => ({...prev, 'COO': true}));
@@ -1006,7 +980,23 @@ export function RelatedDocuments({
             COO
           </span>
           <span 
-            className={`px-1.5 py-1 rounded cursor-pointer ${invoicesExport.length > 0 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-700'} hover:opacity-80`}
+            className={`px-1.5 py-1 rounded cursor-pointer ${insuranceDocuments.length > 0 ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'} hover:opacity-80`}
+            onClick={() => {
+              if (!relatedDocumentsExpanded) setRelatedDocumentsExpanded(true);
+              setExpandedSections(prev => ({...prev, 'INSURANCE': true}));
+              setTimeout(() => {
+                const element = document.querySelector('[data-section="INSURANCE"]');
+                if (element) {
+                  element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                  window.scrollBy({ top: -20, behavior: 'smooth' });
+                }
+              }, 100);
+            }}
+          >
+            INS
+          </span>
+          <span 
+            className={`px-1.5 py-1 rounded cursor-pointer ${invoiceExportDocuments.length > 0 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-700'} hover:opacity-80`}
             onClick={() => {
               if (!relatedDocumentsExpanded) setRelatedDocumentsExpanded(true);
               setExpandedSections(prev => ({...prev, 'INVOICE_EXPORT': true}));
@@ -1019,10 +1009,10 @@ export function RelatedDocuments({
               }, 100);
             }}
           >
-            Exp Inv
+            INV-E
           </span>
           <span 
-            className={`px-1.5 py-1 rounded cursor-pointer ${invoices.length > 0 ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-700'} hover:opacity-80`}
+            className={`px-1.5 py-1 rounded cursor-pointer ${invoiceDocuments.length > 0 ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-700'} hover:opacity-80`}
             onClick={() => {
               if (!relatedDocumentsExpanded) setRelatedDocumentsExpanded(true);
               setExpandedSections(prev => ({...prev, 'INVOICE': true}));
@@ -1035,7 +1025,7 @@ export function RelatedDocuments({
               }, 100);
             }}
           >
-            Real Inv
+            Inv
           </span>
           <span 
             className={`px-1.5 py-1 rounded cursor-pointer ${coas.length > 0 ? 'bg-pink-100 text-pink-700' : 'bg-gray-100 text-gray-700'} hover:opacity-80`}
@@ -1051,10 +1041,10 @@ export function RelatedDocuments({
               }, 100);
             }}
           >
-            COA's
+            COA
           </span>
           <span 
-            className={`px-1.5 py-1 rounded cursor-pointer ${existingSED ? 'bg-violet-100 text-violet-700' : 'bg-gray-100 text-gray-700'} hover:opacity-80`}
+            className={`px-1.5 py-1 rounded cursor-pointer ${seds.length > 0 ? 'bg-violet-100 text-violet-700' : 'bg-gray-100 text-gray-700'} hover:opacity-80`}
             onClick={() => {
               if (!relatedDocumentsExpanded) setRelatedDocumentsExpanded(true);
               setExpandedSections(prev => ({...prev, 'SED': true}));
@@ -1112,13 +1102,13 @@ export function RelatedDocuments({
           </div>
           
           {/* Only show documents that exist on mobile, or all on desktop */}
-          {(existingPL || !isMobile) && (
+          {(plDocuments.length > 0 || !isMobile) && (
             <div className="flex flex-col space-y-2 border-b pb-3" data-section="PL">
               <div 
                 className="flex justify-between items-center cursor-pointer" 
                 onClick={() => toggleSection('PL')}
               >
-                <p className="font-medium">{existingPL ? 'Packing List' : 'Add Packing List'}</p>
+                <p className="font-medium">{plDocuments.length > 0 ? 'Packing List' : 'Add Packing List'}</p>
                 {expandedSections['PL'] ? 
                   <ChevronUp className="h-5 w-5 text-gray-500" /> : 
                   <ChevronDown className="h-5 w-5 text-gray-500" />
@@ -1128,13 +1118,13 @@ export function RelatedDocuments({
             </div>
           )}
           
-          {(existingCOO || !isMobile) && (
+          {(cooDocuments.length > 0 || !isMobile) && (
             <div className="flex flex-col space-y-2 border-b pb-3" data-section="COO">
               <div 
                 className="flex justify-between items-center cursor-pointer" 
                 onClick={() => toggleSection('COO')}
               >
-                <p className="font-medium">{existingCOO ? 'Certificate of Origin' : 'Add Certificate of Origin'}</p>
+                <p className="font-medium">{cooDocuments.length > 0 ? 'Certificate of Origin' : 'Add Certificate of Origin'}</p>
                 {expandedSections['COO'] ? 
                   <ChevronUp className="h-5 w-5 text-gray-500" /> : 
                   <ChevronDown className="h-5 w-5 text-gray-500" />
@@ -1145,14 +1135,14 @@ export function RelatedDocuments({
           )}
 
           {/* Multiple document type sections */}
-          {(invoicesExport.length > 0 || !isMobile) && (
+          {(invoiceExportDocuments.length > 0 || !isMobile) && (
             <div className="flex flex-col space-y-2 border-b pb-3" data-section="INVOICE_EXPORT">
               <div 
                 className="flex justify-between items-center cursor-pointer" 
                 onClick={() => toggleSection('INVOICE_EXPORT')}
               >
                 <div className="flex justify-between items-center w-full">
-                  <p className="font-medium">{invoicesExport.length > 0 ? `Invoices for Export (${invoicesExport.length})` : 'Add Invoices for Export'}</p>
+                  <p className="font-medium">{invoiceExportDocuments.length > 0 ? `Invoices for Export (${invoiceExportDocuments.length})` : 'Add Invoices for Export'}</p>
                   <div className="flex items-center space-x-2">
                     {/* Upload button next to the section title */}
                     <Button
@@ -1170,7 +1160,7 @@ export function RelatedDocuments({
                       ) : (
                         <FilePlus className="mr-2 h-4 w-4" />
                       )}
-                      Upload {invoicesExport.length > 0 ? "(more)" : ""}
+                      Upload {invoiceExportDocuments.length > 0 ? "(more)" : ""}
                     </Button>
                     {expandedSections['INVOICE_EXPORT'] ? 
                       <ChevronUp className="h-5 w-5 text-gray-500" /> : 
@@ -1180,9 +1170,9 @@ export function RelatedDocuments({
                 </div>
               </div>
               {/* Only render the document list for existing documents when expanded */}
-              {expandedSections['INVOICE_EXPORT'] && invoicesExport.length > 0 && (
+              {expandedSections['INVOICE_EXPORT'] && invoiceExportDocuments.length > 0 && (
                 <div className="space-y-2">
-                  {invoicesExport.map((doc) => (
+                  {invoiceExportDocuments.map((doc) => (
                     <div key={doc._id} className="flex flex-col sm:flex-row gap-2 w-full">
                       <Button
                         variant="outline"
@@ -1216,14 +1206,14 @@ export function RelatedDocuments({
             </div>
           )}
           
-          {(invoices.length > 0 || !isMobile) && (
+          {(invoiceDocuments.length > 0 || !isMobile) && (
             <div className="flex flex-col space-y-2 border-b pb-3" data-section="INVOICE">
               <div 
                 className="flex justify-between items-center cursor-pointer" 
                 onClick={() => toggleSection('INVOICE')}
               >
                 <div className="flex justify-between items-center w-full">
-                  <p className="font-medium">{invoices.length > 0 ? `Real Invoices (${invoices.length})` : 'Add Real Invoices'}</p>
+                  <p className="font-medium">{invoiceDocuments.length > 0 ? `Real Invoices (${invoiceDocuments.length})` : 'Add Real Invoices'}</p>
                   <div className="flex items-center space-x-2">
                     {/* Upload button next to the section title */}
                     <Button
@@ -1241,7 +1231,7 @@ export function RelatedDocuments({
                       ) : (
                         <FilePlus className="mr-2 h-4 w-4" />
                       )}
-                      Upload {invoices.length > 0 ? "(more)" : ""}
+                      Upload {invoiceDocuments.length > 0 ? "(more)" : ""}
                     </Button>
                     {expandedSections['INVOICE'] ? 
                       <ChevronUp className="h-5 w-5 text-gray-500" /> : 
@@ -1251,9 +1241,9 @@ export function RelatedDocuments({
                 </div>
               </div>
               {/* Only render the document list for existing documents when expanded */}
-              {expandedSections['INVOICE'] && invoices.length > 0 && (
+              {expandedSections['INVOICE'] && invoiceDocuments.length > 0 && (
                 <div className="space-y-2">
-                  {invoices.map((doc) => (
+                  {invoiceDocuments.map((doc) => (
                     <div key={doc._id} className="flex flex-col sm:flex-row gap-2 w-full">
                       <Button
                         variant="outline"
@@ -1359,14 +1349,14 @@ export function RelatedDocuments({
           )}
           
           {/* SED - Single document per BOL */}
-          {(existingSED || !isMobile) && (
+          {(seds.length > 0 || !isMobile) && (
             <div className="flex flex-col space-y-2 border-b pb-3" data-section="SED">
               <div 
                 className="flex justify-between items-center cursor-pointer" 
                 onClick={() => toggleSection('SED')}
               >
                 <div className="flex justify-between items-center w-full">
-                  <p className="font-medium">{existingSED ? 'Shipper\'s Export Declaration (SED)' : 'Add Shipper\'s Export Declaration (SED)'}</p>
+                  <p className="font-medium">{seds.length > 0 ? 'Shipper\'s Export Declaration (SED)' : 'Add Shipper\'s Export Declaration (SED)'}</p>
                   <div className="flex items-center space-x-2">
                     {/* Upload button next to the section title */}
                     <Button
@@ -1384,7 +1374,7 @@ export function RelatedDocuments({
                       ) : (
                         <FilePlus className="mr-2 h-4 w-4" />
                       )}
-                      {existingSED ? "Replace" : "Upload"}
+                      {seds.length > 0 ? "Replace" : "Upload"}
                     </Button>
                     {expandedSections['SED'] ? 
                       <ChevronUp className="h-5 w-5 text-gray-500" /> : 
@@ -1394,20 +1384,20 @@ export function RelatedDocuments({
                 </div>
               </div>
               {/* Only render the document if it exists and section is expanded */}
-              {expandedSections['SED'] && existingSED && (
+              {expandedSections['SED'] && seds.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex flex-col sm:flex-row gap-2 w-full">
                     <Button
                       variant="outline"
                       size="sm"
                       className="w-full justify-start overflow-hidden"
-                      onClick={() => window.open(`/api/documents/download/${existingSED._id}`, '_blank')}
+                      onClick={() => window.open(`/api/documents/download/${seds[0]._id}`, '_blank')}
                     >
                       <FileText className="mr-2 h-4 w-4 flex-shrink-0" />
                       {isMobile ? (
-                        <span className="truncate">{existingSED.fileName}</span>
+                        <span className="truncate">{seds[0].fileName}</span>
                       ) : (
-                        <span className="truncate">View SED {existingSED.fileName.split('.')[0]}</span>
+                        <span className="truncate">View SED {seds[0].fileName.split('.')[0]}</span>
                       )}
                     </Button>
                     
@@ -1416,8 +1406,78 @@ export function RelatedDocuments({
                       variant="outline"
                       size="sm"
                       className="hidden sm:flex w-full justify-start sm:w-auto text-red-500 hover:text-red-700"
-                      onClick={() => confirmDeleteDocument(existingSED)}
+                      onClick={() => confirmDeleteDocument(seds[0])}
                       disabled={uploadingSED}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          
+          {/* Insurance - Single document per BOL */}
+          {(insuranceDocuments.length > 0 || !isMobile) && (
+            <div className="flex flex-col space-y-2 border-b pb-3" data-section="INSURANCE">
+              <div 
+                className="flex justify-between items-center cursor-pointer" 
+                onClick={() => toggleSection('INSURANCE')}
+              >
+                <div className="flex justify-between items-center w-full">
+                  <p className="font-medium">{insuranceDocuments.length > 0 ? 'Insurance Document' : 'Add Insurance Document'}</p>
+                  <div className="flex items-center space-x-2">
+                    {/* Upload button next to the section title */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="hidden sm:flex items-center mr-2"
+                      onClick={(e) => {
+                        e.stopPropagation(); // Prevent section toggle
+                        handleUploadDocument('INSURANCE');
+                      }}
+                      disabled={uploadingInsurance}
+                    >
+                      {uploadingInsurance ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <FilePlus className="mr-2 h-4 w-4" />
+                      )}
+                      {insuranceDocuments.length > 0 ? "Replace" : "Upload"}
+                    </Button>
+                    {expandedSections['INSURANCE'] ? 
+                      <ChevronUp className="h-5 w-5 text-gray-500" /> : 
+                      <ChevronDown className="h-5 w-5 text-gray-500" />
+                    }
+                  </div>
+                </div>
+              </div>
+              {/* Only render the document if it exists and section is expanded */}
+              {expandedSections['INSURANCE'] && insuranceDocuments.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex flex-col sm:flex-row gap-2 w-full">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full justify-start overflow-hidden"
+                      onClick={() => window.open(`/api/documents/download/${insuranceDocuments[0]._id}`, '_blank')}
+                    >
+                      <FileText className="mr-2 h-4 w-4 flex-shrink-0" />
+                      {isMobile ? (
+                        <span className="truncate">{insuranceDocuments[0].fileName}</span>
+                      ) : (
+                        <span className="truncate">View Insurance {insuranceDocuments[0].fileName.split('.')[0]}</span>
+                      )}
+                    </Button>
+                    
+                    {/* Delete button - hidden on mobile */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="hidden sm:flex w-full justify-start sm:w-auto text-red-500 hover:text-red-700"
+                      onClick={() => confirmDeleteDocument(insuranceDocuments[0])}
+                      disabled={uploadingInsurance}
                     >
                       <Trash2 className="mr-2 h-4 w-4" />
                       Delete
@@ -1508,7 +1568,7 @@ export function RelatedDocuments({
                 onClick={() => toggleSection('SAFETY_SHEET')}
               >
                 <div className="flex justify-between items-center w-full">
-                  <p className="font-medium">{safetySheets.length > 0 ? `Product Safety Sheets (${safetySheets.length})` : 'Add Product Safety Sheets'}</p>
+                  <p className="font-medium">{safetySheets.length > 0 ? `Safety Data Sheets (${safetySheets.length})` : 'Add Safety Data Sheets'}</p>
                   <div className="flex items-center space-x-2">
                     {/* Upload button next to the section title */}
                     <Button
@@ -1550,7 +1610,7 @@ export function RelatedDocuments({
                         {isMobile ? (
                           <span className="truncate">{doc.fileName}</span>
                         ) : (
-                          <span className="truncate">View Product Safety Sheet {doc.fileName.split('.')[0]}</span>
+                          <span className="truncate">View Safety Data Sheet {doc.fileName.split('.')[0]}</span>
                         )}
                       </Button>
                       
@@ -1573,8 +1633,9 @@ export function RelatedDocuments({
           )}
 
           {/* Add a message when no documents exist on mobile - Update to include all document types */}
-          {!existingPL && !existingCOO && invoicesExport.length === 0 && invoices.length === 0 && 
-            coas.length === 0 && !existingSED && dataSheets.length === 0 && safetySheets.length === 0 && isMobile && (
+          {!plDocuments.length && !cooDocuments.length && invoiceExportDocuments.length === 0 && 
+           invoiceDocuments.length === 0 && coas.length === 0 && seds.length === 0 && 
+           dataSheets.length === 0 && safetySheets.length === 0 && insuranceDocuments.length === 0 && isMobile && (
             <p className="text-sm text-muted-foreground">
               No related documents available. Use desktop or tablet view to create documents.
             </p>
