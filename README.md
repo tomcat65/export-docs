@@ -1,3 +1,36 @@
+# Document Export System
+
+## Deployment Notes
+
+This project is configured to be deployed on Vercel with the following customizations:
+
+- Custom domain: https://txwos-docs.fyi
+- ESLint checks are disabled during build with `next.config.js`
+- Environment variables are set up for the production environment in `.env.production`
+- API routes use proper TypeScript types for Next.js 15 compatibility
+
+### Vercel Environment Variables
+
+When deploying to Vercel, ensure the following environment variables are set:
+
+- `GOOGLE_CLIENT_ID` 
+- `GOOGLE_CLIENT_SECRET`
+- `NEXTAUTH_SECRET`
+- `MONGODB_URI`
+- `ANTHROPIC_API_KEY`
+
+The `OPENAI_API_KEY` is not used and does not need to be set.
+
+### Local Development
+
+For local development:
+
+```bash
+npm run dev
+```
+
+This will run the application on http://localhost:3000.
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started

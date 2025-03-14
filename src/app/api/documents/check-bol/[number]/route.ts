@@ -3,9 +3,15 @@ import { auth } from '@/lib/auth'
 import { connectDB } from '@/lib/db'
 import { Document } from '@/models/Document'
 
+type RouteParams = {
+  params: {
+    number: string
+  }
+}
+
 export async function GET(
   request: NextRequest,
-  { params }: { params: { number: string } }
+  { params }: RouteParams
 ) {
   try {
     // Check authentication
