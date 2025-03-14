@@ -2,6 +2,7 @@
 
 import { SessionProvider } from 'next-auth/react'
 import { useEffect, useState } from 'react'
+import { SwrProvider } from '@/hooks/swr/swr-provider'
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false)
@@ -14,5 +15,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
     return null
   }
 
-  return <SessionProvider>{children}</SessionProvider>
+  return (
+    <SessionProvider>
+      <SwrProvider>
+        {children}
+      </SwrProvider>
+    </SessionProvider>
+  )
 } 

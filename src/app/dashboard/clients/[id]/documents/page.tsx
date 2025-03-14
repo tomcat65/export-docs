@@ -154,5 +154,7 @@ export default async function ClientDocumentsPage({
   const client = await getClientWithDocuments(id)
   if (!client) notFound()
 
+  // Using the SWR-powered ClientDocumentsWrapper
+  // This will ensure real-time updates across all open windows
   return <ClientDocumentsWrapper initialClient={client} />
 }
