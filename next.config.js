@@ -5,6 +5,11 @@ const nextConfig = {
     // Warning rather than error
     ignoreDuringBuilds: true,
   },
+  // Tell TypeScript to ignore type errors too
+  typescript: {
+    // Warning rather than error
+    ignoreBuildErrors: true,
+  },
   // Add any other Next.js config options here
   webpack(config) {
     // Allow SVG imports

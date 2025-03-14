@@ -3,15 +3,15 @@ import { auth } from '@/lib/auth'
 import { connectDB } from '@/lib/db'
 import { Document } from '@/models/Document'
 
-type RouteParams = {
+interface RouteContext {
   params: {
-    number: string
-  }
+    number: string;
+  };
 }
 
 export async function GET(
   request: NextRequest,
-  { params }: RouteParams
+  context: RouteContext
 ) {
   try {
     // Check authentication
@@ -20,7 +20,7 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { number } = params
+    const { number } = context.params
     if (!number) {
       return NextResponse.json({ error: 'BOL number is required' }, { status: 400 })
     }
