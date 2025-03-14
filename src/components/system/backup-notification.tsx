@@ -1,50 +1,47 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
+import useSWR from 'swr'
+import { createSwrConfig } from '@/hooks/swr/swr-config'
+import { useSession } from 'next-auth/react'
 
 export function BackupNotification() {
-  const [backupInProgress, setBackupInProgress] = useState(false)
-  const [errorCount, setErrorCount] = useState(0)
+  // Always call hooks at the top level, never inside conditions
+  // This ensures hooks are called in the same order on every render
+  const { data: session, status } = useSession({ required: false })
+  const isAuthenticated = status === 'authenticated'
   
-  useEffect(() => {
-    // Helper function to check backup status
-    const checkBackupStatus = async () => {
-      try {
-        const response = await fetch('/api/system/backup/status')
-        
-        if (!response.ok) {
-          // Error or unauthorized, don't show notification
-          setErrorCount(prev => prev + 1)
-          return
-        }
-        
-        // Reset error count on successful request
-        setErrorCount(0)
-        
-        const data = await response.json()
-        setBackupInProgress(data.status?.status === 'in_progress')
-      } catch (error) {
-        console.error('Failed to check backup status:', error)
-        setErrorCount(prev => prev + 1)
+  // Create the SWR config once per component instance
+  const swrConfig = createSwrConfig({
+    refreshInterval: 300000, // 5 minutes
+    revalidateOnFocus: false, // Don't need to check on focus for this feature
+    dedupingInterval: 60000, // 1 minute
+  })
+  
+  // Always call useSWR with a key, even if it's conditionally null
+  // This way the hook is always called in the same order
+  const { data, error } = useSWR(
+    isAuthenticated ? '/api/system/backup/status' : null,
+    async (url) => {
+      const response = await fetch(url)
+      if (!response.ok) {
+        throw new Error('Failed to fetch backup status')
       }
-    }
-    
-    // Check status immediately
-    checkBackupStatus()
-    
-    // Calculate interval based on error count (exponential backoff)
-    // Start with 30 seconds, but increase with errors up to 5 minutes maximum
-    const interval = setInterval(
-      checkBackupStatus, 
-      Math.min(30000 * Math.pow(1.5, errorCount), 300000)
-    )
-    
-    // Clean up the interval when the component unmounts
-    return () => clearInterval(interval)
-  }, [errorCount])
+      return response.json()
+    },
+    swrConfig
+  )
   
-  // If no backup is in progress, don't render anything
+  // Process data only if authenticated
+  if (!isAuthenticated) {
+    return null
+  }
+  
+  // Derive backup status from SWR data
+  const backupInProgress = data?.status?.status === 'in_progress'
+  
+  // If no backup is in progress or data is still loading, don't render anything
   if (!backupInProgress) {
     return null
   }

@@ -3,7 +3,6 @@
 import { Building2, Globe2, Linkedin, Mail, MapPin, Phone } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import Image from 'next/image'
-import ReactCountryFlag from 'react-country-flag'
 
 export function Footer() {
   const currentYear = new Date().getFullYear()
@@ -26,16 +25,28 @@ export function Footer() {
                 <span>6300 N Main Rd, Houston, TX 77009</span>
               </p>
               <p className="flex items-center gap-2">
-                <span style={{ display: 'inline-block', width: '1.2em', height: '1.2em' }}>
-                  <ReactCountryFlag 
-                    countryCode="US"
-                    svg
-                    style={{ 
-                      width: '100%', 
-                      height: '100%' 
-                    }}
-                  />
-                </span>
+                <svg 
+                  width="1.2em" 
+                  height="1.2em" 
+                  viewBox="0 0 512 512" 
+                  aria-label="United States" 
+                  role="img"
+                  className="shrink-0"
+                >
+                  <rect width="512" height="512" fill="#f0f0f0"/>
+                  <g fill="#d80027">
+                    <rect width="512" height="39.4" y="39.4"/>
+                    <rect width="512" height="39.4" y="118.2"/>
+                    <rect width="512" height="39.4" y="197"/>
+                    <rect width="512" height="39.4" y="275.8"/>
+                    <rect width="512" height="39.4" y="354.6"/>
+                    <rect width="512" height="39.4" y="433.4"/>
+                  </g>
+                  <rect width="275.8" height="275.8" fill="#2e52b2"/>
+                  <g fill="#f0f0f0">
+                    <path d="M38 66l3.3 10h10.5l-8.5 6.2 3.2 10-8.5-6.2-8.5 6.2 3.3-10-8.5-6.2h10.5zm55.2 0l3.3 10H107l-8.5 6.2 3.2 10-8.5-6.2-8.5 6.2 3.3-10-8.5-6.2h10.5zm55.2 0l3.3 10h10.5l-8.5 6.2 3.2 10-8.5-6.2-8.5 6.2 3.3-10-8.5-6.2h10.5zm55.2 0l3.3 10h10.5l-8.5 6.2 3.2 10-8.5-6.2-8.5 6.2 3.3-10-8.5-6.2h10.5zm55.2 0l3.3 10h10.5l-8.5 6.2 3.2 10-8.5-6.2-8.5 6.2 3.3-10-8.5-6.2h10.5zM38 121.3l3.3 10h10.5l-8.5 6.2 3.2 10-8.5-6.2-8.5 6.2 3.3-10-8.5-6.2h10.5zm55.2 0l3.3 10H107l-8.5 6.2 3.2 10-8.5-6.2-8.5 6.2 3.3-10-8.5-6.2h10.5zm55.2 0l3.3 10h10.5l-8.5 6.2 3.2 10-8.5-6.2-8.5 6.2 3.3-10-8.5-6.2h10.5zm55.2 0l3.3 10h10.5l-8.5 6.2 3.2 10-8.5-6.2-8.5 6.2 3.3-10-8.5-6.2h10.5zm55.2 0l3.3 10h10.5l-8.5 6.2 3.2 10-8.5-6.2-8.5 6.2 3.3-10-8.5-6.2h10.5zM38 176l3.3 10h10.5l-8.5 6.2 3.2 10-8.5-6.2-8.5 6.2 3.3-10-8.5-6.2h10.5zm55.2 0l3.3 10H107l-8.5 6.2 3.2 10-8.5-6.2-8.5 6.2 3.3-10-8.5-6.2h10.5zm55.2 0l3.3 10h10.5l-8.5 6.2 3.2 10-8.5-6.2-8.5 6.2 3.3-10-8.5-6.2h10.5zm55.2 0l3.3 10h10.5l-8.5 6.2 3.2 10-8.5-6.2-8.5 6.2 3.3-10-8.5-6.2h10.5zm55.2 0l3.3 10h10.5l-8.5 6.2 3.2 10-8.5-6.2-8.5 6.2 3.3-10-8.5-6.2h10.5zM38 230.8l3.3 10h10.5l-8.5 6.2 3.2 10-8.5-6.2-8.5 6.2 3.3-10-8.5-6.2h10.5zm55.2 0l3.3 10H107l-8.5 6.2 3.2 10-8.5-6.2-8.5 6.2 3.3-10-8.5-6.2h10.5zm55.2 0l3.3 10h10.5l-8.5 6.2 3.2 10-8.5-6.2-8.5 6.2 3.3-10-8.5-6.2h10.5zm55.2 0l3.3 10h10.5l-8.5 6.2 3.2 10-8.5-6.2-8.5 6.2 3.3-10-8.5-6.2h10.5zm55.2 0l3.3 10h10.5l-8.5 6.2 3.2 10-8.5-6.2-8.5 6.2 3.3-10-8.5-6.2h10.5z"/>
+                  </g>
+                </svg>
                 <span>United States of America</span>
               </p>
             </div>

@@ -21,8 +21,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className} suppressHydrationWarning>
-        <BackupNotification />
-        <Providers>{children}</Providers>
+        <Providers>
+          <BackupNotification />
+          {children}
+        </Providers>
         <Toaster />
       </body>
     </html>
