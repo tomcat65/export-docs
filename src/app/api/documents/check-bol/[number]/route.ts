@@ -5,7 +5,7 @@ import { Document } from '@/models/Document'
 
 export async function GET(
   request: NextRequest,
-  context: { params: { number: string } }
+  { params }: { params: { number: string } }
 ) {
   try {
     // Check authentication
@@ -14,7 +14,7 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { number } = context.params
+    const { number } = params
     if (!number) {
       return NextResponse.json({ error: 'BOL number is required' }, { status: 400 })
     }
