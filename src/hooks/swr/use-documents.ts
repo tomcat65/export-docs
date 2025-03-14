@@ -85,26 +85,62 @@ export function useClientDocuments(clientId: string | null) {
 /**
  * Helper function to mutate all document-related cache entries
  * This is useful when a document is created, updated, or deleted
+ * @param clientId - Optional client ID to include in the event detail
  */
-export function mutateAllDocuments(): void {
-  // This implementation depends on how SWR cache is being accessed globally
-  // For now, we're using window events to trigger revalidation across tabs
-  window.dispatchEvent(new CustomEvent('mutate-documents'));
+export function mutateAllDocuments(clientId?: string): void {
+  // Use localStorage to help with cross-tab communication
+  // The timestamp serves as a unique identifier for this mutation event
+  const timestamp = new Date().getTime();
+  try {
+    // Save the mutation event in localStorage
+    localStorage.setItem('document-mutation', JSON.stringify({
+      timestamp,
+      clientId,
+    }));
+    
+    // Dispatch an event for the current window
+    window.dispatchEvent(new CustomEvent('mutate-documents', {
+      detail: { timestamp, clientId }
+    }));
+    
+    console.log(`Dispatched document mutation event at ${timestamp}`);
+  } catch (error) {
+    console.error('Error triggering document mutation:', error);
+  }
 }
 
 /**
  * Setup a listener for document mutations across tabs
  * This function should be called once at the application root
+ * @param mutateDocuments - The SWR mutate function to call when a mutation is detected
  */
 export function setupDocumentsMutationListener(mutateDocuments: KeyedMutator<any>): () => void {
-  const handler = () => {
+  // Handler for storage events (cross-tab communication)
+  const storageHandler = (event: StorageEvent) => {
+    if (event.key === 'document-mutation' && event.newValue) {
+      try {
+        const data = JSON.parse(event.newValue);
+        console.log('Received cross-tab document mutation:', data);
+        mutateDocuments();
+      } catch (error) {
+        console.error('Error handling storage event:', error);
+      }
+    }
+  };
+  
+  // Handler for custom events (same-tab communication)
+  const eventHandler = () => {
+    console.log('Received same-window document mutation');
     mutateDocuments();
   };
   
-  window.addEventListener('mutate-documents', handler);
+  // Add event listeners
+  window.addEventListener('mutate-documents', eventHandler);
+  window.addEventListener('storage', storageHandler);
   
   // Return cleanup function
   return () => {
-    window.removeEventListener('mutate-documents', handler);
+    window.removeEventListener('mutate-documents', eventHandler);
+    window.removeEventListener('storage', storageHandler);
   };
 } 

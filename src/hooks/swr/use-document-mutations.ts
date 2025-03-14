@@ -72,7 +72,7 @@ export function useDocumentMutations(): DocumentMutationHookResult {
       const result = await uploadResponse.json();
       
       // Trigger revalidation across all windows
-      mutateAllDocuments();
+      mutateAllDocuments(clientId);
       
       return result.document;
     } catch (err) {

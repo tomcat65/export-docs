@@ -8,7 +8,7 @@ import { DocumentList } from '@/components/document-list'
 import { ArrowLeft } from 'lucide-react'
 import { useClientDocuments } from '@/hooks/swr/use-documents'
 import { useDocumentMutations } from '@/hooks/swr/use-document-mutations'
-import { mutateAllDocuments } from '@/hooks/swr/use-documents'
+import { mutateAllDocuments, setupDocumentsMutationListener } from '@/hooks/swr/use-documents'
 import { Document } from '@/models/Document'
 
 // Define the client interface
@@ -52,12 +52,24 @@ export function ClientDocumentsWrapper({
     setClient(initialClient)
   }, [initialClient])
 
+  // Set up document mutation listener for cross-tab communication
+  useEffect(() => {
+    if (client.id) {
+      // Set up listener that will trigger revalidation when mutations happen
+      const cleanup = setupDocumentsMutationListener(mutate);
+      
+      return () => {
+        cleanup(); // Clean up listener when component unmounts or clientId changes
+      };
+    }
+  }, [client.id, mutate])
+
   // Refresh documents by triggering a mutation
   const refreshDocuments = async () => {
     mutate()
     
     // Also notify other tabs/windows of the change
-    mutateAllDocuments()
+    mutateAllDocuments(client.id)
   }
 
   // Handle document deletion
