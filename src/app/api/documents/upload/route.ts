@@ -571,10 +571,28 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Error uploading document:', error)
+    // Look for API key error patterns
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    
+    if (errorMessage.includes('TIME TO CHANGE THE API KEY') || 
+        errorMessage.includes('authentication_error') ||
+        errorMessage.includes('401')) {
+      console.error('Anthropic API Key Error:', errorMessage);
+      return NextResponse.json(
+        { 
+          error: 'API key authentication failed', 
+          message: 'It appears your Anthropic API key is invalid or expired. Please update it in your environment variables.',
+          needsNewApiKey: true 
+        },
+        { status: 401 }
+      );
+    }
+    
+    // Handle other errors
+    console.error('Claude processing error:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Error uploading document' },
+      { error: 'Failed to process document with Claude' },
       { status: 500 }
-    )
+    );
   }
 } 

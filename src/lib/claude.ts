@@ -1,4 +1,5 @@
-import { Anthropic } from '@anthropic-ai/sdk'
+import { processDocumentWithClaude as processWithClaude } from './anthropic-fetch';
+import type { AnthropicResponse } from './anthropic-fetch';
 
 interface Container {
   containerNumber: string
@@ -59,104 +60,13 @@ interface ProcessedDocument {
   }
 }
 
-// Add retry configuration
-const MAX_RETRIES = 3
-const RETRY_DELAY = 1000 // 1 second
-
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY
-})
-
-async function callClaudeWithRetry(
-  systemPrompt: string,
-  userPrompt: string,
-  document: { type: 'pdf' | 'image'; data?: string },
-  retryCount = 0
-): Promise<any> {
-  try {
-    console.log(`Calling Claude API (attempt ${retryCount + 1})`)
-    const anthropic = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY
-    })
-
-    // Check if document data is present - critical for replacement workflows
-    if (!document.data) {
-      console.warn('Document data is missing - this might be a replacement request without document data')
-      throw new Error('Document data is required for Claude processing')
-    }
-
-    const contentBlock = document.type === 'pdf'
-      ? {
-          type: 'document' as const,
-          source: {
-            type: 'base64' as const,
-            media_type: 'application/pdf' as const,
-            data: document.data.replace(/^data:application\/pdf;base64,/, '')
-          }
-        }
-      : {
-          type: 'image' as const,
-          source: {
-            type: 'base64' as const,
-            media_type: 'image/png' as const,
-            data: document.data.replace(/^data:image\/png;base64,/, '')
-          }
-        };
-
-    const message = await anthropic.messages.create({
-      model: 'claude-3-7-sonnet-20250219',
-      max_tokens: 4096,
-      temperature: 0,
-      system: systemPrompt,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: userPrompt + "\n\nIMPORTANT: Make sure to include ALL containers in the response. If there are more than 5 containers, DO NOT truncate the response. Process ALL pages of the document."
-            },
-            contentBlock
-          ]
-        }
-      ]
-    })
-    return message
-  } catch (error: any) {
-    // Check if we should retry
-    if (retryCount < MAX_RETRIES && (
-      error.status === 429 || // Too Many Requests
-      error.status === 500 || // Internal Server Error
-      error.status === 503 || // Service Unavailable
-      error.message?.includes('overloaded') ||
-      error.message?.includes('token limit') ||
-      error.type === 'overloaded_error' ||
-      error.type === 'token_limit_error'
-    )) {
-      console.log(`Retry attempt ${retryCount + 1} after error:`, error.message)
-      
-      // If we hit token limits, try with a more focused prompt
-      if (error.message?.includes('token limit') || error.type === 'token_limit_error') {
-        console.log('Token limit reached, retrying with focused prompt')
-        const focusedPrompt = `${userPrompt}\n\nFOCUS ON EXTRACTING:\n1. BOL number and basic shipment details\n2. ALL container numbers, seals, and quantities\n3. Process every page thoroughly\n4. Do not skip any containers`
-        return callClaudeWithRetry(systemPrompt, focusedPrompt, document, retryCount + 1)
-      }
-      
-      await sleep(RETRY_DELAY * Math.pow(2, retryCount)) // Exponential backoff
-      return callClaudeWithRetry(systemPrompt, userPrompt, document, retryCount + 1)
-    }
-    throw error
-  }
-}
-
+// This is the main entry point for BOL document processing
 export async function processDocumentWithClaude(
   document: { type: 'pdf' | 'image'; data: string },
   template?: string
-) {
+): Promise<ProcessedDocument> {
   try {
-    console.log(`Processing ${document.type} document`)
+    console.log(`Processing ${document.type} document with Claude API`);
     
     const systemPrompt = `You are a logistics document parser specializing in Bills of Lading (BOL).
 Your task is to analyze ALL PAGES of the provided Bill of Lading ${document.type} and extract specific information in a structured JSON format.
@@ -186,7 +96,7 @@ Pay special attention to:
 2. The "Carrier's Reference" field which contains important reference numbers - MAKE SURE TO EXTRACT THIS CORRECTLY
 3. ALL pages of the "PARTICULARS FURNISHED BY SHIPPER" section for complete container details
 4. The shipper, consignee, and notify party sections for complete address information
-5. Any continuation pages that may contain additional container or cargo details`
+5. Any continuation pages that may contain additional container or cargo details`;
 
     const userPrompt = `I'm providing you with a Bill of Lading (BOL) document that may have multiple pages.
 Please analyze ALL PAGES thoroughly and extract the information into the following JSON structure.
@@ -256,124 +166,129 @@ Return this EXACT JSON structure with the values found:
     "freightTerms": "",    // Freight/shipping terms
     "itnNumber": ""       // ITN number if available
   }
-}`
+}`;
 
-    console.log('Calling Claude API')
-    const message = await callClaudeWithRetry(systemPrompt, userPrompt, document)
-
-    const firstContent = message.content[0]
-    if (!firstContent || firstContent.type !== 'text') {
-      console.error('Invalid Claude response format:', message)
-      throw new Error('Invalid response format from Claude')
+    // Call the implementation in anthropic-fetch.ts
+    const apiResponse = await processWithClaude(document, systemPrompt, userPrompt);
+    console.log('Received successful response from Anthropic API');
+    
+    if (!apiResponse.content || apiResponse.content.length === 0) {
+      throw new Error('Empty response from Claude API');
     }
-
-    try {
-      // Try to find a JSON object in the response
-      const text = firstContent.text.trim()
-      console.log('Claude response text:', text)
-      
-      let jsonStr = text
-      // If the response contains more than just JSON, try to extract it
-      if (!text.startsWith('{') || !text.endsWith('}')) {
-        const jsonMatch = text.match(/\{[\s\S]*\}/)
-        if (!jsonMatch) {
-          console.error('No JSON object found in response:', text)
-          throw new Error('No JSON object found in Claude response')
-        }
-        jsonStr = jsonMatch[0]
-      }
-
-      // Check for incomplete JSON response
-      if (!jsonStr.includes('"commercial"') || !jsonStr.includes('"containers"')) {
-        throw new Error('Incomplete JSON response - missing required sections')
-      }
-
-      // Parse the JSON and validate required fields
-      const data = JSON.parse(jsonStr) as ProcessedDocument
-      
-      // Validate required fields with detailed error messages
-      if (!data.shipmentDetails) {
-        throw new Error('Missing shipmentDetails section')
-      }
-
-      // Handle the case where Claude puts the BOL number in carrierReference instead
-      if (!data.shipmentDetails.bolNumber && data.shipmentDetails.carrierReference) {
-        console.log(`No BOL number found, but carrierReference exists: ${data.shipmentDetails.carrierReference}`);
-        
-        // Sometimes Claude incorrectly puts the BOL number in the carrier reference field
-        // Only use it if it looks like a BOL number format (alphanumeric without spaces)
-        if (/^[A-Za-z0-9]+$/.test(data.shipmentDetails.carrierReference)) {
-          console.log(`Using carrier reference as BOL number: ${data.shipmentDetails.carrierReference}`);
-          data.shipmentDetails.bolNumber = data.shipmentDetails.carrierReference;
-          // We're keeping the original carrierReference value, as we're merely copying it to bolNumber
-        } else {
-          console.log(`Carrier reference doesn't look like a BOL number format, not using it.`);
-        }
-      }
-      
-      // Now check if we have a BOL number after the potential extraction
-      if (!data.shipmentDetails.bolNumber) {
-        throw new Error('Missing BOL number in shipmentDetails')
-      }
-
-      if (!data.parties) {
-        throw new Error('Missing parties section')
-      }
-      if (!data.parties.shipper) {
-        throw new Error('Missing shipper information in parties')
-      }
-      if (!data.parties.consignee) {
-        throw new Error('Missing consignee information in parties')
-      }
-      if (!Array.isArray(data.containers)) {
-        throw new Error('containers field is not an array')
-      }
-      if (data.containers.length === 0) {
-        throw new Error('No containers found in document')
-      }
-
-      // Validate container data
-      data.containers.forEach((container, index) => {
-        if (!container.containerNumber) {
-          throw new Error(`Missing containerNumber in container ${index + 1}`)
-        }
-        if (!container.product) {
-          throw new Error(`Missing product information in container ${index + 1}`)
-        }
-      })
-
-      // Additional validation for container count
-      if (data.containers.length < parseInt(data.shipmentDetails.totalContainers || '0')) {
-        throw new Error(`Missing containers: found ${data.containers.length} but expected ${data.shipmentDetails.totalContainers}`)
-      }
-
-      // Trim whitespace from string fields
-      data.shipmentDetails.bolNumber = data.shipmentDetails.bolNumber.trim()
-      
-      console.log('Successfully processed document:', {
-        bolNumber: data.shipmentDetails.bolNumber,
-        containerCount: data.containers.length
-      })
-
-      // Ensure carrier reference field exists and has the correct name
-      // @ts-ignore - Check for misnamed field
-      if (data.shipmentDetails.carriersReference !== undefined && data.shipmentDetails.carrierReference === undefined) {
-        // Fix naming inconsistency if present
-        // @ts-ignore - Access misnamed field
-        data.shipmentDetails.carrierReference = data.shipmentDetails.carriersReference;
-        // @ts-ignore - Delete misnamed field
-        delete data.shipmentDetails.carriersReference;
-        console.log('Fixed carrier reference field name in Claude response');
-      }
-
-      return data
-    } catch (error) {
-      console.error('Error parsing Claude response:', error)
-      console.error('Response text:', firstContent.text)
-      throw new Error(`Failed to parse Claude response: ${error instanceof Error ? error.message : 'Unknown error'}`)
-    }
+    
+    // Process the response
+    return processClaudeResponse(apiResponse.content[0]);
+    
   } catch (error) {
-    console.error('Error in processDocumentWithClaude:', error)
-    throw error
+    console.error('Error in processDocumentWithClaude:', error);
+    throw error;
+  }
+}
+
+// Helper function to process Claude response
+function processClaudeResponse(firstContent: any): ProcessedDocument {
+  try {
+    // Try to find a JSON object in the response
+    const text = firstContent.text.trim();
+    console.log('Claude response text begins with:', text.substring(0, 50) + '...');
+    
+    let jsonStr = text;
+    if (!text.startsWith('{') || !text.endsWith('}')) {
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        console.error('No JSON object found in response:', text);
+        throw new Error('No JSON object found in Claude response');
+      }
+      jsonStr = jsonMatch[0];
+    }
+
+    // Check for incomplete JSON response
+    if (!jsonStr.includes('"commercial"') || !jsonStr.includes('"containers"')) {
+      throw new Error('Incomplete JSON response - missing required sections');
+    }
+
+    // Parse the JSON and validate required fields
+    const data = JSON.parse(jsonStr) as ProcessedDocument;
+    
+    // Validate required fields with detailed error messages
+    if (!data.shipmentDetails) {
+      throw new Error('Missing shipmentDetails section');
+    }
+
+    // Handle the case where Claude puts the BOL number in carrierReference instead
+    if (!data.shipmentDetails.bolNumber && data.shipmentDetails.carrierReference) {
+      console.log(`No BOL number found, but carrierReference exists: ${data.shipmentDetails.carrierReference}`);
+      
+      // Sometimes Claude incorrectly puts the BOL number in the carrier reference field
+      // Only use it if it looks like a BOL number format (alphanumeric without spaces)
+      if (/^[A-Za-z0-9]+$/.test(data.shipmentDetails.carrierReference)) {
+        console.log(`Using carrier reference as BOL number: ${data.shipmentDetails.carrierReference}`);
+        data.shipmentDetails.bolNumber = data.shipmentDetails.carrierReference;
+        // We're keeping the original carrierReference value, as we're merely copying it to bolNumber
+      } else {
+        console.log(`Carrier reference doesn't look like a BOL number format, not using it.`);
+      }
+    }
+    
+    // Now check if we have a BOL number after the potential extraction
+    if (!data.shipmentDetails.bolNumber) {
+      throw new Error('Missing BOL number in shipmentDetails');
+    }
+
+    if (!data.parties) {
+      throw new Error('Missing parties section');
+    }
+    if (!data.parties.shipper) {
+      throw new Error('Missing shipper information in parties');
+    }
+    if (!data.parties.consignee) {
+      throw new Error('Missing consignee information in parties');
+    }
+    if (!Array.isArray(data.containers)) {
+      throw new Error('containers field is not an array');
+    }
+    if (data.containers.length === 0) {
+      throw new Error('No containers found in document');
+    }
+
+    // Validate container data
+    data.containers.forEach((container, index) => {
+      if (!container.containerNumber) {
+        throw new Error(`Missing containerNumber in container ${index + 1}`);
+      }
+      if (!container.product) {
+        throw new Error(`Missing product information in container ${index + 1}`);
+      }
+    });
+
+    // Additional validation for container count
+    if (data.containers.length < parseInt(data.shipmentDetails.totalContainers || '0')) {
+      throw new Error(`Missing containers: found ${data.containers.length} but expected ${data.shipmentDetails.totalContainers}`);
+    }
+
+    // Trim whitespace from string fields
+    data.shipmentDetails.bolNumber = data.shipmentDetails.bolNumber.trim();
+    
+    console.log('Successfully processed document:', {
+      bolNumber: data.shipmentDetails.bolNumber,
+      containerCount: data.containers.length
+    });
+
+    // Ensure carrier reference field exists and has the correct name
+    // @ts-ignore - Check for misnamed field
+    if (data.shipmentDetails.carriersReference !== undefined && data.shipmentDetails.carrierReference === undefined) {
+      // Fix naming inconsistency if present
+      // @ts-ignore - Access misnamed field
+      data.shipmentDetails.carrierReference = data.shipmentDetails.carriersReference;
+      // @ts-ignore - Delete misnamed field
+      delete data.shipmentDetails.carriersReference;
+      console.log('Fixed carrier reference field name in Claude response');
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error parsing Claude response:', error);
+    console.error('Response text:', firstContent.text);
+    throw new Error(`Failed to parse Claude response: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 } 

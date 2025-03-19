@@ -13,7 +13,14 @@ export const authOptions = {
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID || '',
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET || ''
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+      authorization: {
+        params: {
+          redirect_uri: process.env.NODE_ENV === 'production' 
+            ? 'https://txwos-docs.fyi/api/auth/callback/google'
+            : 'http://localhost:3000/api/auth/callback/google'
+        }
+      }
     })
   ],
   // Add debug mode in development
@@ -148,6 +155,11 @@ export const authOptions = {
     signIn: '/login',
     error: '/login', // Add error page route
   },
+  // Add URL configurations for production vs development
+  urls: {
+    baseUrl: process.env.NEXTAUTH_URL,
+    origin: process.env.NEXTAUTH_URL,
+  }
 }
 
 export const auth = () => getServerSession(authOptions) 

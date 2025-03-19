@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
+import { AnthropicApiError } from './anthropic-api-error'
 
 interface DocumentUploadProps {
   clientId: string
@@ -35,6 +36,7 @@ export function DocumentUpload({ clientId }: DocumentUploadProps) {
   const [fileExists, setFileExists] = useState(false)
   const [warningMessage, setWarningMessage] = useState('')
   const [warningData, setWarningData] = useState<any>(null)
+  const [apiKeyError, setApiKeyError] = useState<boolean>(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   async function onFileChange(event: React.ChangeEvent<HTMLInputElement>) {
@@ -503,6 +505,30 @@ export function DocumentUpload({ clientId }: DocumentUploadProps) {
     }
   }, [warningMessage, warningData, fileExists, toast, duplicateDocId]);
 
+  const onDrop = useCallback(
+    async (acceptedFiles: File[]) => {
+      try {
+        // Reset any previous error state
+        setApiKeyError(false);
+        
+        // ... rest of the existing upload logic
+      } catch (error) {
+        // ... existing error logic
+        
+        // Check if this is an API key error
+        const errorDetail = error?.response?.data?.needsNewApiKey || 
+                           error?.message?.includes('API key') ||
+                           error?.message?.includes('authentication');
+        
+        if (errorDetail) {
+          setApiKeyError(true);
+          console.error('Anthropic API Key Error:', error?.response?.data?.message || 'Authentication failed');
+        }
+      }
+    },
+    // ... other dependencies
+  );
+
   return (
     <>
     <Card>
@@ -592,6 +618,15 @@ export function DocumentUpload({ clientId }: DocumentUploadProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {apiKeyError ? (
+        <div className="mb-6">
+          <AnthropicApiError 
+            message="The API key for Anthropic's Claude service appears to be invalid or expired. Document processing will not work until this is fixed."
+            onRetry={() => setApiKeyError(false)}
+          />
+        </div>
+      ) : null}
     </>
   )
 } 

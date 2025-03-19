@@ -38,7 +38,12 @@ export function LoginForm() {
 
         <Button
           className="w-full flex items-center justify-center gap-3"
-          onClick={() => signIn('google', { callbackUrl: '/dashboard' })}
+          onClick={() => signIn('google', { 
+            callbackUrl: '/dashboard',
+            redirect_uri: process.env.NODE_ENV === 'production'
+              ? 'https://txwos-docs.fyi/api/auth/callback/google'
+              : 'http://localhost:3000/api/auth/callback/google'
+          })}
         >
           <svg className="w-5 h-5" viewBox="0 0 24 24">
             <path

@@ -428,7 +428,27 @@ export function RelatedDocuments({
     const exists = docArray.length > 0;
     const label = type === 'PL' ? 'Packing List' : 'Certificate of Origin';
     
-    if (!exists) return null;
+    // If document doesn't exist, render Add button
+    if (!exists) {
+      return (
+        <div className="flex flex-col sm:flex-row gap-2 w-full">
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full justify-start overflow-hidden"
+            onClick={() => openConfirmDialog(type)}
+            disabled={generatingPL || generatingCOO || !bolId}
+          >
+            {generatingPL || generatingCOO ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <FilePlus className="mr-2 h-4 w-4 flex-shrink-0" />
+            )}
+            <span className="truncate">Add {label}</span>
+          </Button>
+        </div>
+      );
+    }
     
     // Find the first document of the correct type
     const doc = docArray[0];
@@ -1114,7 +1134,67 @@ export function RelatedDocuments({
                   <ChevronDown className="h-5 w-5 text-gray-500" />
                 }
               </div>
-              {expandedSections['PL'] && renderDocumentButton('PL')}
+              {expandedSections['PL'] && (
+                plDocuments.length > 0 ? (
+                  // If document exists, show view/edit/regenerate buttons
+                  <div className="flex flex-col sm:flex-row gap-2 w-full">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full justify-start overflow-hidden"
+                      onClick={() => window.open(`/api/documents/download/${plDocuments[0]._id}`, '_blank')}
+                    >
+                      <FileText className="mr-2 h-4 w-4 flex-shrink-0" />
+                      <span className="truncate">View Packing List</span>
+                    </Button>
+                    
+                    {/* Edit button - hidden on mobile */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="hidden sm:flex w-full justify-start sm:w-auto"
+                      onClick={() => handleOpenEditDialog(plDocuments[0])}
+                    >
+                      <Edit className="mr-2 h-4 w-4" />
+                      Edit
+                    </Button>
+                    
+                    {/* Regenerate button - hidden on mobile */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="hidden sm:flex w-full justify-start sm:w-auto"
+                      onClick={() => openConfirmDialog('PL')}
+                      disabled={generatingPL || !bolId}
+                    >
+                      {generatingPL ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                      )}
+                      Regenerate
+                    </Button>
+                  </div>
+                ) : (
+                  // If document doesn't exist, show add button
+                  <div className="flex flex-col sm:flex-row gap-2 w-full">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full justify-start overflow-hidden"
+                      onClick={() => openConfirmDialog('PL')}
+                      disabled={generatingPL || !bolId}
+                    >
+                      {generatingPL ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <FilePlus className="mr-2 h-4 w-4 flex-shrink-0" />
+                      )}
+                      <span className="truncate">Generate Packing List</span>
+                    </Button>
+                  </div>
+                )
+              )}
             </div>
           )}
           
@@ -1130,7 +1210,56 @@ export function RelatedDocuments({
                   <ChevronDown className="h-5 w-5 text-gray-500" />
                 }
               </div>
-              {expandedSections['COO'] && renderDocumentButton('COO')}
+              {expandedSections['COO'] && (
+                cooDocuments.length > 0 ? (
+                  // If document exists, show view/regenerate buttons
+                  <div className="flex flex-col sm:flex-row gap-2 w-full">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full justify-start overflow-hidden"
+                      onClick={() => window.open(`/api/documents/${cooDocuments[0]._id}/view`, '_blank')}
+                    >
+                      <FileText className="mr-2 h-4 w-4 flex-shrink-0" />
+                      <span className="truncate">View Certificate of Origin</span>
+                    </Button>
+                    
+                    {/* Regenerate button - hidden on mobile */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="hidden sm:flex w-full justify-start sm:w-auto"
+                      onClick={() => openConfirmDialog('COO')}
+                      disabled={generatingCOO || !bolId}
+                    >
+                      {generatingCOO ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                      )}
+                      Regenerate
+                    </Button>
+                  </div>
+                ) : (
+                  // If document doesn't exist, show add button  
+                  <div className="flex flex-col sm:flex-row gap-2 w-full">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full justify-start overflow-hidden"
+                      onClick={() => openConfirmDialog('COO')}
+                      disabled={generatingCOO || !bolId}
+                    >
+                      {generatingCOO ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <FilePlus className="mr-2 h-4 w-4 flex-shrink-0" />
+                      )}
+                      <span className="truncate">Generate Certificate of Origin</span>
+                    </Button>
+                  </div>
+                )
+              )}
             </div>
           )}
 

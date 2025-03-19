@@ -6,7 +6,13 @@ export default withAuth(
   function middleware(req) {
     console.log('Middleware check:', {
       path: req.nextUrl.pathname,
-      isAdmin: req.nextauth.token?.isAdmin
+      isAdmin: req.nextauth.token?.isAdmin,
+      // Add more debugging info
+      hostname: req.nextUrl.hostname,
+      origin: req.nextUrl.origin,
+      basePath: req.nextUrl.basePath,
+      fullUrl: req.nextUrl.toString(),
+      headers: Object.fromEntries(req.headers)
     })
 
     // If trying to access dashboard without admin rights, redirect to login
