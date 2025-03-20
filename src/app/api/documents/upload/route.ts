@@ -259,7 +259,7 @@ export async function POST(request: NextRequest) {
       if (!relatedBol) {
         return NextResponse.json({ error: 'Related BOL not found' }, { status: 400 })
       }
-      clientId = relatedBol.clientId;
+      clientId = relatedBol.clientId.toString();
     }
 
     // For related documents, we don't need client verification
@@ -391,7 +391,7 @@ export async function POST(request: NextRequest) {
     // Always process with Claude first to verify the client
     console.log('Processing BOL with Claude for client verification:', bolNumber)
     const claudeData = await processDocumentWithClaude({
-      type: docType,
+      type: file.type.includes('pdf') ? 'pdf' : 'image',
       data: buffer.toString('base64')
     }) as ProcessedDocument;
 
