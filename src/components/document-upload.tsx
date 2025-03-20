@@ -87,43 +87,49 @@ export function DocumentUpload({ clientId }: DocumentUploadProps) {
           })
 
           if (!response.ok) {
-            // Improved error handling to deal with non-JSON responses
-            let errorData;
+            // Clone the response before reading it so we can try both JSON and text
+            const responseClone = response.clone();
+            
+            // Try to parse as JSON first
             try {
-              // Try to parse as JSON first
-              errorData = await response.json();
+              const errorData = await response.json();
+              
+              // Special handling for client mismatch errors
+              if (errorData.status === 'client_mismatch') {
+                const message = errorData.suggestedClient 
+                  ? `This document belongs to ${errorData.suggestedClient.name}. Please select the correct client.` 
+                  : errorData.error;
+                  
+                setIsProcessing(false)
+                toast({
+                  title: 'Client Mismatch',
+                  description: message,
+                  variant: 'destructive',
+                  duration: 5000 // Show for longer
+                })
+                return // Prevent further processing
+              }
+              
+              throw new Error(errorData.error || 'Failed to upload document')
             } catch (jsonError) {
-              // If JSON parsing fails, get the text response instead
-              const textError = await response.text();
+              // If JSON parsing fails, get the text response from the cloned response
+              const textError = await responseClone.text();
               throw new Error(textError || 'Failed to upload document. Server returned non-JSON response.');
             }
-                
-            // Special handling for client mismatch errors
-            if (errorData.status === 'client_mismatch') {
-              const message = errorData.suggestedClient 
-                ? `This document belongs to ${errorData.suggestedClient.name}. Please select the correct client.` 
-                : errorData.error;
-                
-              setIsProcessing(false)
-              toast({
-                title: 'Client Mismatch',
-                description: message,
-                variant: 'destructive',
-                duration: 5000 // Show for longer
-              })
-              return // Prevent further processing
-            }
-            
-            throw new Error(errorData.error || 'Failed to upload document')
           }
 
+          // Clone the response before reading it, so we can safely read it
+          const responseClone = response.clone();
+          
           // Improved JSON parsing error handling
           let result;
           try {
             result = await response.json();
           } catch (jsonError) {
             console.error('Error parsing JSON response:', jsonError);
-            throw new Error('Failed to parse server response. The server may be experiencing issues.');
+            // Use the cloned response for text if JSON parsing fails
+            const textContent = await responseClone.text();
+            throw new Error(`Failed to parse server response: ${textContent}`);
           }
           
           // Check the response
@@ -356,6 +362,7 @@ export function DocumentUpload({ clientId }: DocumentUploadProps) {
     toast({
       title: 'Success',
       description: 'Document uploaded and processed successfully',
+      variant: 'default'
     })
     
     // Add small delay to ensure toast is seen

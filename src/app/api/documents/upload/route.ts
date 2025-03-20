@@ -389,16 +389,32 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(arrayBuffer)
 
     // Always process with Claude first to verify the client
-    console.log('Processing BOL with Claude for client verification:', bolNumber)
-    const claudeData = await processDocumentWithClaude({
-      type: file.type.includes('pdf') ? 'pdf' : 'image',
-      data: buffer.toString('base64')
-    }) as ProcessedDocument;
-
-    // SECURITY CHECK: Log the entire Claude response for debugging critical issues
-    console.log('---------- CLAUDE FULL RESPONSE ----------');
-    console.log(JSON.stringify(claudeData, null, 2));
-    console.log('------------------------------------------');
+    console.log('Processing BOL with Claude for client verification:', bolNumber);
+    
+    // Declare claudeData outside the try block
+    let claudeData: ProcessedDocument;
+    
+    try {
+      // Process the document with Claude
+      const result = await processDocumentWithClaude({
+        type: file.type.includes('pdf') ? 'pdf' : 'image',
+        data: buffer.toString('base64')
+      });
+      
+      // Store the result in our variable
+      claudeData = result as ProcessedDocument;
+      
+      // SECURITY CHECK: Log the entire Claude response for debugging critical issues
+      console.log('---------- CLAUDE FULL RESPONSE ----------');
+      console.log(JSON.stringify(claudeData, null, 2));
+      console.log('------------------------------------------');
+    } catch (claudeError) {
+      console.error('Error during Claude processing:', claudeError);
+      return NextResponse.json({
+        error: 'Failed to process document with AI. The document may be too complex or our AI service may be experiencing issues.',
+        details: claudeError instanceof Error ? claudeError.message : 'Unknown error'
+      }, { status: 500 });
+    }
 
     // Fix any naming inconsistencies with carrier reference
     // @ts-ignore - Check for misnamed field
