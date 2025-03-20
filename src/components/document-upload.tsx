@@ -77,18 +77,27 @@ export function DocumentUpload({ clientId }: DocumentUploadProps) {
           
           setProgress('Analyzing document...')
           // Upload and process document
-      const formData = new FormData()
-      formData.append('file', file)
+          const formData = new FormData()
+          formData.append('file', file)
           formData.append('document', JSON.stringify(documentData))
 
-      const response = await fetch(`/api/clients/${clientId}/documents/upload`, {
-        method: 'POST',
-        body: formData
-      })
+          const response = await fetch(`/api/clients/${clientId}/documents/upload`, {
+            method: 'POST',
+            body: formData
+          })
 
-      if (!response.ok) {
-        const errorData = await response.json()
-            
+          if (!response.ok) {
+            // Improved error handling to deal with non-JSON responses
+            let errorData;
+            try {
+              // Try to parse as JSON first
+              errorData = await response.json();
+            } catch (jsonError) {
+              // If JSON parsing fails, get the text response instead
+              const textError = await response.text();
+              throw new Error(textError || 'Failed to upload document. Server returned non-JSON response.');
+            }
+                
             // Special handling for client mismatch errors
             if (errorData.status === 'client_mismatch') {
               const message = errorData.suggestedClient 
@@ -105,10 +114,17 @@ export function DocumentUpload({ clientId }: DocumentUploadProps) {
               return // Prevent further processing
             }
             
-        throw new Error(errorData.error || 'Failed to upload document')
+            throw new Error(errorData.error || 'Failed to upload document')
           }
 
-          const result = await response.json()
+          // Improved JSON parsing error handling
+          let result;
+          try {
+            result = await response.json();
+          } catch (jsonError) {
+            console.error('Error parsing JSON response:', jsonError);
+            throw new Error('Failed to parse server response. The server may be experiencing issues.');
+          }
           
           // Check the response
           if (result.warning) {

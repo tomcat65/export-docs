@@ -79,9 +79,9 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error('Error validating BOL:', error)
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Error validating BOL' },
-      { status: 500 }
-    )
+    // Always return a properly formatted JSON response
+    return NextResponse.json({ 
+      error: error instanceof Error ? error.message : 'An unexpected error occurred while validating the BOL'
+    }, { status: 500 })
   }
 } 

@@ -313,24 +313,43 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
     }))
   }
 
-  const handleDeleteDocument = async () => {
+  const handleDocumentDeleted = async () => {
     if (!selectedDocument) return
 
+    setShowDeleteConfirm(false)
+
     try {
-      const response = await fetch(`/api/documents/${selectedDocument._id}`, {
+      // For BOL deletion, also include the documentId parameter
+      const url = selectedDocument.type === 'BOL'
+        ? `/api/documents/${selectedDocument._id}?isBol=true`
+        : `/api/documents/${selectedDocument._id}`
+
+      const response = await fetch(url, {
         method: 'DELETE',
       })
 
       if (!response.ok) {
-        throw new Error('Failed to delete document')
+        // Improved error handling for different response formats
+        let errorMessage;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || 'Failed to delete document';
+        } catch (e) {
+          // If JSON parsing fails, get the text response
+          const textError = await response.text();
+          errorMessage = textError || 'Failed to delete document';
+        }
+        
+        throw new Error(errorMessage);
       }
 
       toast({
         title: 'Document Deleted',
-        description: `${selectedDocument.fileName} has been deleted successfully`,
+        description: `${selectedDocument.fileName} has been deleted`,
       })
 
-      // Call the callback if provided, otherwise refresh the page
+      setSelectedDocument(null)
+      
       if (onDocumentDeleted) {
         onDocumentDeleted()
       } else {
@@ -342,9 +361,6 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
         description: error instanceof Error ? error.message : 'Failed to delete document',
         variant: 'destructive',
       })
-    } finally {
-      setShowDeleteConfirm(false)
-      setSelectedDocument(null)
     }
   }
 
@@ -837,7 +853,7 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteDocument}>Delete</AlertDialogAction>
+            <AlertDialogAction onClick={handleDocumentDeleted}>Delete</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

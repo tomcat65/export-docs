@@ -217,50 +217,58 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Get the uploaded file and form data
+    // Get the uploaded file and relevant metadata
     const formData = await request.formData()
     const file = formData.get('file') as File
-    const type = formData.get('type') as string
-    const relatedBolId = formData.get('relatedBolId') as string
-    const subType = formData.get('subType') as string | null
-    
-    // For BOL uploads, we need clientId and bolNumber
-    const clientId = formData.get('clientId') as string
+    let clientId = formData.get('clientId') as string
     const bolNumber = formData.get('bolNumber') as string
+    const relatedBolId = formData.get('relatedBolId') as string
+    const docType = formData.get('documentType') as string || formData.get('type') as string
+    const subType = formData.get('subType') as string
     
-    // Validate required fields based on document type
+    // Check required fields
     if (!file) {
-      return NextResponse.json({ error: 'Missing file' }, { status: 400 })
-    }
-    
-    if (type === 'BOL' && (!clientId || !bolNumber)) {
-      return NextResponse.json({ error: 'Missing required fields for BOL upload' }, { status: 400 })
-    }
-    
-    if (type !== 'BOL' && !relatedBolId) {
-      return NextResponse.json({ error: 'Missing relatedBolId for related document' }, { status: 400 })
+      return NextResponse.json({ error: 'No file provided' }, { status: 400 })
     }
 
+    if (!clientId && !relatedBolId) {
+      return NextResponse.json({ error: 'No client selected and no related BOL provided' }, { status: 400 })
+    }
+
+    // Check file type
+    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg']
+    if (!allowedTypes.includes(file.type)) {
+      return NextResponse.json({ error: 'File must be a PDF or image (JPEG, PNG)' }, { status: 400 })
+    }
+
+    // Log essential info for debugging
+    console.log('==== DOCUMENT UPLOAD REQUEST ====')
+    console.log(`Environment: ${process.env.NODE_ENV || 'unknown'}`)
+    console.log(`File: ${file.name} (${file.type}, ${Math.round(file.size / 1024)}KB)`)
+    console.log(`Client ID: ${clientId || 'not provided'}`)
+    console.log(`BOL Number: ${bolNumber || 'not provided'}`)
+    console.log(`Related BOL ID: ${relatedBolId || 'not provided'}`)
+    console.log(`Document Type: ${docType || 'not provided'}`)
+    console.log('=================================')
+    
     await connectDB()
-    
-    let documentClientId = clientId;
-    
+
     // If this is a related document, get the client ID from the related BOL
     if (relatedBolId && !clientId) {
       const relatedBol = await Document.findById(relatedBolId);
       if (!relatedBol) {
-        return NextResponse.json({ error: 'Related BOL not found' }, { status: 404 })
+        return NextResponse.json({ error: 'Related BOL not found' }, { status: 400 })
       }
-      documentClientId = relatedBol.clientId.toString();
+      clientId = relatedBol.clientId;
     }
 
     // For related documents, we don't need client verification
-    if (type !== 'BOL') {
+    if (docType !== 'BOL') {
       try {
         console.log('Uploading related document:', {
-          type,
+          type: docType,
           relatedBolId,
-          documentClientId
+          clientId
         });
         
         // Upload related document directly
@@ -276,11 +284,11 @@ export async function POST(request: NextRequest) {
         const uploadStream = bucket.openUploadStream(file.name, {
           contentType: file.type,
           metadata: {
-            clientId: documentClientId,
+            clientId: clientId,
             uploadedBy: session.user?.email,
             uploadedAt: new Date().toISOString(),
             fileName: file.name,
-            documentType: type,
+            documentType: docType,
             relatedBolId: relatedBolId
           }
         })
@@ -292,31 +300,31 @@ export async function POST(request: NextRequest) {
             .on('finish', resolve)
         })
 
-        console.log('File uploaded to GridFS, creating document record with type:', type);
+        console.log('File uploaded to GridFS, creating document record with type:', docType);
         
         // Create document record for related document
         const documentData = {
-          clientId: documentClientId,
+          clientId: clientId,
           fileName: file.name,
           fileId: uploadStream.id,
-          type: type,  // We'll handle type validation below
+          type: docType,  // We'll handle type validation below
           relatedBolId: new mongoose.Types.ObjectId(relatedBolId),
           createdAt: new Date(),
           updatedAt: new Date(),
-          subType: subType || (type === 'INVOICE_EXPORT' ? 'EXPORT' : undefined)
+          subType: docType === 'INVOICE_EXPORT' ? 'EXPORT' : undefined
         };
         
         console.log('Document data:', JSON.stringify(documentData));
         
         // Force the type to be one of the enum values if needed
         // This is a temporary fix if the model validation is too strict
-        if (!VALID_DOCUMENT_TYPES.includes(type as any)) {
-          console.warn(`Invalid document type: ${type}, defaulting to 'BOL'`);
+        if (!VALID_DOCUMENT_TYPES.includes(docType as any)) {
+          console.warn(`Invalid document type: ${docType}, defaulting to 'BOL'`);
           documentData.type = 'BOL';
         }
         
         // Fix for INVOICE type
-        if (type === 'INVOICE') {
+        if (docType === 'INVOICE') {
           // Ensure we're using a valid enum value that matches the schema
           documentData.type = 'INVOICE_EXPORT';
           // Set subType to distinguish regular invoices from export invoices
@@ -364,7 +372,7 @@ export async function POST(request: NextRequest) {
     
     // If we reach here, this is a BOL upload, continue with the existing BOL processing
     // Get the selected client's details
-    const selectedClient = await Client.findById(documentClientId).lean() as unknown as ClientDocument
+    const selectedClient = await Client.findById(clientId).lean() as unknown as ClientDocument
     if (!selectedClient) {
       return NextResponse.json({ error: 'Selected client not found' }, { status: 400 })
     }
@@ -382,9 +390,8 @@ export async function POST(request: NextRequest) {
 
     // Always process with Claude first to verify the client
     console.log('Processing BOL with Claude for client verification:', bolNumber)
-    const documentType = file.type.includes('pdf') ? 'pdf' : 'image'
     const claudeData = await processDocumentWithClaude({
-      type: documentType,
+      type: docType,
       data: buffer.toString('base64')
     }) as ProcessedDocument;
 
@@ -449,7 +456,7 @@ export async function POST(request: NextRequest) {
 
     // Verify the consignee matches the selected client
     const consignee = claudeData.parties.consignee
-    const verificationResult = await verifyClientMatch(consignee, documentClientId);
+    const verificationResult = await verifyClientMatch(consignee, clientId);
     
     if (!verificationResult.isMatch) {
       const errorMessage = verificationResult.matchedClient 
@@ -528,7 +535,7 @@ export async function POST(request: NextRequest) {
     const uploadStream = bucket.openUploadStream(file.name, {
       contentType: file.type,
       metadata: {
-        clientId: documentClientId,
+        clientId: clientId,
         bolNumber,
         uploadedBy: session.user?.email,
         uploadedAt: new Date().toISOString(),
@@ -546,7 +553,7 @@ export async function POST(request: NextRequest) {
 
     // Create new document record with Claude's extracted data
     const newDocument = await Document.create({
-      clientId: documentClientId,
+      clientId: clientId,
       fileName: file.name,
       fileId: uploadStream.id,
       type: 'BOL',
@@ -571,28 +578,15 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error) {
-    // Look for API key error patterns
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('Error processing upload:', error)
     
-    if (errorMessage.includes('TIME TO CHANGE THE API KEY') || 
-        errorMessage.includes('authentication_error') ||
-        errorMessage.includes('401')) {
-      console.error('Anthropic API Key Error:', errorMessage);
-      return NextResponse.json(
-        { 
-          error: 'API key authentication failed', 
-          message: 'It appears your Anthropic API key is invalid or expired. Please update it in your environment variables.',
-          needsNewApiKey: true 
-        },
-        { status: 401 }
-      );
-    }
-    
-    // Handle other errors
-    console.error('Claude processing error:', error);
-    return NextResponse.json(
-      { error: 'Failed to process document with Claude' },
-      { status: 500 }
-    );
+    // Ensure we always return a properly formatted JSON response
+    return NextResponse.json({
+      error: error instanceof Error 
+        ? error.message 
+        : 'An unexpected error occurred during document upload'
+    }, { 
+      status: 500
+    })
   }
 } 
