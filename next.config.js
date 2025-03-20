@@ -20,6 +20,7 @@ const nextConfig = {
 
     return config;
   },
+  // Content Security Policy removed as we're not using iframes anymore
 }
 
 export default nextConfig; 

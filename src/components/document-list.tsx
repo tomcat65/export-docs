@@ -32,6 +32,7 @@ import {
 import { RelatedDocuments } from './related-documents'
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
+import { TrackingModal } from '@/components/ui/tracking-modal'
 
 interface Container {
   containerNumber: string
@@ -612,11 +613,23 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
                         onClick={(e) => toggleShipmentDetails(e, bolNumber)}
                       >
                         <h3 className="font-medium">Shipping Details</h3>
-                        {isShipmentDetailsExpanded ? (
-                          <ChevronUp className="h-4 w-4" />
-                        ) : (
-                          <ChevronDown className="h-4 w-4" />
-                        )}
+                        <div className="flex items-center space-x-2">
+                          <TrackingModal 
+                            bolNumber={bolDoc.bolData?.bolNumber}
+                            bookingNumber={bolDoc.bolData?.bookingNumber}
+                            carrierReference={bolDoc.bolData?.carrierReference}
+                            containerNumber={bolDoc.bolData?.containers && bolDoc.bolData.containers.length > 0 
+                              ? bolDoc.bolData.containers[0].containerNumber 
+                              : undefined}
+                            defaultCarrier={bolDoc.bolData?.carrierReference?.includes('HL') ? 'HAPAG' : 
+                                           bolDoc.bolData?.carrierReference?.includes('CMA') ? 'CMA' : undefined}
+                          />
+                          {isShipmentDetailsExpanded ? (
+                            <ChevronUp className="h-4 w-4" />
+                          ) : (
+                            <ChevronDown className="h-4 w-4" />
+                          )}
+                        </div>
                       </div>
                       
                       {isShipmentDetailsExpanded && (
