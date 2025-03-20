@@ -355,27 +355,26 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
 
   // Function to handle document generation
   const handleDocumentGenerated = () => {
-    // Preserve the current expanded state
-    const currentExpandedState = { ...expandedCards };
-    const currentShipmentDetailsState = { ...expandedShipmentDetails };
-    
-    // Set a flag in sessionStorage to preserve the expanded state
-    sessionStorage.setItem('expandedCards', JSON.stringify(currentExpandedState));
-    sessionStorage.setItem('expandedShipmentDetails', JSON.stringify(currentShipmentDetailsState));
-    sessionStorage.setItem('preserveDocumentListState', 'true');
-    
+    // Check if we need to refetch documents
     if (onDocumentDeleted) {
-      onDocumentDeleted();
+      onDocumentDeleted()
     } else {
-      // Use router.refresh() to refresh data without a full page navigation
-      router.refresh();
+      // If no callback is provided, we can directly refresh the document list
+      // by refetching from the server
+      router.refresh()
+      
+      // This flag is set when generating documents to preserve expand states
+      const shouldPreserveState = sessionStorage.getItem('preserveDocumentListState')
+      
+      if (shouldPreserveState) {
+        // Keep the previous expansion state
+        sessionStorage.removeItem('preserveDocumentListState')
+      } else {
+        // Reset expansion states otherwise
+        setExpandedCards({})
+        setExpandedShipmentDetails({})
+      }
     }
-    
-    // After a short delay to allow for data refresh, ensure the expanded state is maintained
-    setTimeout(() => {
-      setExpandedCards(currentExpandedState);
-      setExpandedShipmentDetails(currentShipmentDetailsState);
-    }, 500);
   }
 
   const handleDateSubmit = async (docId: string) => {

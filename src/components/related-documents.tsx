@@ -147,53 +147,38 @@ export function RelatedDocuments({
     relatedBolId: doc.relatedBolId
   })));
   
-  // Get arrays of each document type that can have multiple instances - modified logic for debugging
+  // Get arrays of each document type
+  const cooDocuments = useMemo(() => {
+    // No longer filter by relatedBolId - this was the root cause of the issue
+    // Instead, just show all COO documents that are in the existingDocuments array
+    const filteredDocs = existingDocuments.filter(doc => doc.type === 'COO');
+    console.log('COO docs:', filteredDocs.map(d => ({ id: d._id, relatedBolId: d.relatedBolId })));
+    return filteredDocs;
+  }, [existingDocuments]);
   
-  // First, capture all invoices for debugging
-  const allInvoices = existingDocuments.filter(
-    (doc) => doc.type === 'INVOICE' && doc.relatedBolId === bolId
-  );
-  console.log('All invoices:', allInvoices.map(doc => ({
-    id: doc._id,
-    type: doc.type,
-    subType: doc.subType || 'MISSING',
-    hasSubType: doc.hasOwnProperty('subType'),
-    fileName: doc.fileName
-  })));
+  const plDocuments = useMemo(() => {
+    // No longer filter by relatedBolId - this was the root cause of the issue
+    // Instead, just show all PL documents that are in the existingDocuments array
+    const filteredDocs = existingDocuments.filter(doc => doc.type === 'PL');
+    console.log('PL docs:', filteredDocs.map(d => ({ id: d._id, relatedBolId: d.relatedBolId })));
+    return filteredDocs;
+  }, [existingDocuments]);
   
-  // Then, simplify the export invoice logic and be more lenient
-  const invoicesExport = existingDocuments.filter(
-    (doc) => ((doc.type === 'INVOICE_EXPORT' && doc.subType === 'EXPORT') || 
-              (doc.type === 'INVOICE' && (
-                (doc.subType === 'EXPORT') || 
-                (typeof doc.subType === 'undefined' && doc.fileName.toLowerCase().includes('export'))
-              ))) && 
-             doc.relatedBolId === bolId
-  );
-  console.log('Export invoices filtered:', invoicesExport.map(doc => ({
-    id: doc._id,
-    type: doc.type,
-    subType: doc.subType || 'MISSING',
-    hasSubType: doc.hasOwnProperty('subType'),
-    fileName: doc.fileName
-  })));
+  // These memo declarations also don't filter by relatedBolId anymore
+  const invoiceExportDocuments = useMemo(() => existingDocuments.filter(doc => 
+    doc.type === 'INVOICE_EXPORT' && doc.subType === 'EXPORT'
+  ), [existingDocuments]);
   
-  // Finally, ensure real invoices don't include any that might be exports
-  const invoices = existingDocuments.filter(
-    (doc) => ((doc.type === 'INVOICE_EXPORT' && doc.subType === 'REGULAR') ||
-              (doc.type === 'INVOICE' && 
-               doc.subType !== 'EXPORT' &&
-               !doc.fileName.toLowerCase().includes('export'))) && 
-             doc.relatedBolId === bolId
-  );
-  console.log('Regular invoices filtered:', invoices.map(doc => ({
-    id: doc._id,
-    type: doc.type,
-    subType: doc.subType || 'MISSING',
-    hasSubType: doc.hasOwnProperty('subType'),
-    fileName: doc.fileName
-  })));
-
+  const invoiceDocuments = useMemo(() => existingDocuments.filter(doc => 
+    doc.type === 'INVOICE_EXPORT' && doc.subType === 'REGULAR'
+  ), [existingDocuments]);
+  
+  const coas = useMemo(() => existingDocuments.filter(doc => doc.type === 'COA'), [existingDocuments]);
+  const seds = useMemo(() => existingDocuments.filter(doc => doc.type === 'SED'), [existingDocuments]);
+  const dataSheets = useMemo(() => existingDocuments.filter(doc => doc.type === 'DATA_SHEET'), [existingDocuments]);
+  const safetySheets = useMemo(() => existingDocuments.filter(doc => doc.type === 'SAFETY_SHEET'), [existingDocuments]);
+  const insuranceDocuments = useMemo(() => existingDocuments.filter(doc => doc.type === 'INSURANCE'), [existingDocuments]);
+  
   const handleGenerateDocument = async (type: 'PL' | 'COO', mode: 'new' | 'overwrite') => {
     try {
       // Early validation of bolId
@@ -946,16 +931,6 @@ export function RelatedDocuments({
     return null;
   }
 
-  const cooDocuments = useMemo(() => existingDocuments.filter(doc => doc.type === 'COO'), [existingDocuments])
-  const plDocuments = useMemo(() => existingDocuments.filter(doc => doc.type === 'PL'), [existingDocuments])
-  const invoiceExportDocuments = useMemo(() => existingDocuments.filter(doc => doc.type === 'INVOICE_EXPORT' && doc.subType === 'EXPORT'), [existingDocuments])
-  const invoiceDocuments = useMemo(() => existingDocuments.filter(doc => doc.type === 'INVOICE_EXPORT' && doc.subType === 'REGULAR'), [existingDocuments])
-  const coas = useMemo(() => existingDocuments.filter(doc => doc.type === 'COA'), [existingDocuments])
-  const seds = useMemo(() => existingDocuments.filter(doc => doc.type === 'SED'), [existingDocuments])
-  const dataSheets = useMemo(() => existingDocuments.filter(doc => doc.type === 'DATA_SHEET'), [existingDocuments])
-  const safetySheets = useMemo(() => existingDocuments.filter(doc => doc.type === 'SAFETY_SHEET'), [existingDocuments])
-  const insuranceDocuments = useMemo(() => existingDocuments.filter(doc => doc.type === 'INSURANCE'), [existingDocuments])
-  
   return (
     <div className="mt-4 space-y-4 border rounded-md p-4">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">

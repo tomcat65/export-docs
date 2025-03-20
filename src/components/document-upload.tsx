@@ -339,12 +339,15 @@ export function DocumentUpload({ clientId }: DocumentUploadProps) {
   const showSuccessAndRedirect = () => {
     toast({
       title: 'Success',
-      description: 'Document uploaded and processed successfully'
+      description: 'Document uploaded and processed successfully',
     })
-
+    
+    // Add small delay to ensure toast is seen
+    setTimeout(() => {
+      router.push(`/dashboard/clients/${clientId}`)
+    }, 1500)
+    
     setIsProcessing(false)
-    router.refresh()
-    router.push(`/dashboard/clients/${clientId}/documents`)
   }
 
   const handleSkipDate = () => {
