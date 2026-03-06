@@ -49,7 +49,7 @@ All tasks require 5-check wiring proof before commit:
 - [ ] 003: All /api/debug/* routes return 404 in production
 - [x] 004: COO PDF generates correctly and matches coo-sample.pdf layout
 - [x] 005: Packing List PDF generates correctly
-- [ ] 006: Dashboard shows all documents per BOL in a single folder view
+- [x] 006: Dashboard shows all documents per BOL in a single folder view
 - [ ] 007: User can upload Invoice, COA, SED PDFs and associate them to a BOL
 - [ ] 008: Replace button creates new Document record and marks old as superseded
 - [ ] 009: Audit and retire BillOfLading legacy model if unused
