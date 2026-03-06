@@ -89,7 +89,7 @@
   - Integration: PL route reads Document model for container and quantity data
 
 ## Task 006: BOL Document Folder — folder view UI
-- [ ] 006: Dashboard shows all documents per BOL in a single folder view
+- [x] 006: Dashboard shows all documents per BOL in a single folder view
 - AC:
   - /dashboard/documents/[id] shows Document Folder layout
   - Lists all documents linked to BOL (via relatedBolId + BOL itself)

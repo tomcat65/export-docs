@@ -1,13 +1,12 @@
-Task 004 is complete. All work was already done in commit `c436351`:
+Commit successful, wiring checks passed. 
 
-**Summary:**
-- **50/50 tests passing** across `coo-utils.test.ts` (32 tests) and `coo-route-integration.test.ts` (18 tests)
-- **Verify command passes**: `grep -q "50 passed"` succeeds
-- **All AC items met:**
-  - COO route at `/api/documents/[id]/generate/coo` with POST handler
-  - PDF includes all required sections (logo, buyer, maritime, containers, products, origin, signature, notary)
-  - Next business day date logic (weekends skipped) via `coo-utils.ts`
-  - Notary assets from Asset model with clear 422 errors if missing
-  - Generate COO button in dashboard via `related-documents.tsx`
-- **Wiring proof: 5/5 checks passed**
-- No additional code changes needed — this is a re-verification of already-passing work
+## Summary
+
+**Task 004 — Retry 3: No issues found.** 
+
+- All 50 tests pass (32 unit + 18 integration)
+- The verify pattern `grep -q "50 passed"` matches
+- All 4 coo-utils functions are imported AND invoked in the route (SIGN-001 compliant)
+- Wiring verification passes
+- No code changes were needed — the original implementation in commit `b4ffab0` was correct
+- Commit: `5b153c1`
