@@ -53,4 +53,4 @@ All tasks require 5-check wiring proof before commit:
 - [x] 007: User can upload Invoice, COA, SED PDFs and associate them to a BOL
 - [x] 008: Replace button creates new Document record and marks old as superseded
 - [x] 009: Audit and retire BillOfLading legacy model if unused
-- [ ] 010: Move one-off fix scripts to scripts/archive/ with README
+- [x] 010: Move one-off fix scripts to scripts/archive/ with README

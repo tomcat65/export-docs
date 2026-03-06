@@ -74,3 +74,24 @@ Saves extracted data to `processed-data.json` for manual review.
 
 **Incident:** Used to diagnose why BOL number extraction was producing
 incorrect results for specific documents.
+
+---
+
+### test-firebase.js / test-firebase.cjs
+
+**Purpose:** Manual Firebase connection and function invocation tests.
+Used to verify Firebase Functions deployment and connectivity during setup.
+
+---
+
+### test-firebase-function.js / test-firebase-function.cjs
+
+**Purpose:** Direct test of the `processBolDocument` Firebase Cloud Function.
+Used to test BOL processing outside of the Next.js app during debugging.
+
+---
+
+### test-claude-integration.js
+
+**Purpose:** Direct Anthropic API integration test.
+Used to verify Claude vision API access and BOL extraction prompts in isolation.
