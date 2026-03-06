@@ -1,8 +1,9 @@
 'use client'
 
 import { useParams, useRouter } from 'next/navigation'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
+import { useRef, useState } from 'react'
 import {
   ArrowLeft,
   Download,
@@ -133,14 +134,40 @@ async function fetchFolderDocuments(bolId: string): Promise<FolderDocument[]> {
   return data.documents
 }
 
+async function uploadAssociatedDocument(
+  bolId: string,
+  file: File,
+  type: string
+): Promise<{ success: boolean; document: FolderDocument }> {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('type', type)
+
+  const res = await fetch(routes.api.documents.uploadAssociated(bolId), {
+    method: 'POST',
+    body: formData,
+  })
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: 'Upload failed' }))
+    throw new Error(body.error ?? `HTTP ${res.status}`)
+  }
+
+  return res.json()
+}
+
 // ---------- sub-components ----------
 
 function DocumentCard({
   doc,
   bolId,
+  onReplace,
+  isUploading,
 }: {
   doc: FolderDocument
   bolId: string
+  onReplace?: (type: DocType) => void
+  isUploading?: boolean
 }) {
   const isGenerated = GENERATED_TYPES.includes(doc.type)
   const isUploadType = UPLOAD_TYPES.includes(doc.type)
@@ -211,9 +238,18 @@ function DocumentCard({
         )}
 
         {/* Replace button — upload-only docs */}
-        {isUploadType && (
-          <Button variant="ghost" size="sm" disabled title="Replace (coming soon)">
-            <Replace className="h-4 w-4 mr-1" />
+        {isUploadType && onReplace && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={isUploading}
+            onClick={() => onReplace(doc.type)}
+          >
+            {isUploading ? (
+              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+            ) : (
+              <Replace className="h-4 w-4 mr-1" />
+            )}
             Replace
           </Button>
         )}
@@ -225,9 +261,13 @@ function DocumentCard({
 function EmptySlot({
   type,
   label,
+  onUpload,
+  isUploading,
 }: {
   type: DocType
   label: string
+  onUpload?: (type: DocType) => void
+  isUploading?: boolean
 }) {
   return (
     <div className="flex items-center justify-between p-4 bg-muted/30 border border-dashed rounded-lg">
@@ -243,8 +283,17 @@ function EmptySlot({
         </div>
       </div>
 
-      <Button variant="outline" size="sm" disabled title="Upload (coming soon)">
-        <Upload className="h-4 w-4 mr-1" />
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={isUploading}
+        onClick={() => onUpload?.(type)}
+      >
+        {isUploading ? (
+          <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+        ) : (
+          <Upload className="h-4 w-4 mr-1" />
+        )}
         Upload
       </Button>
     </div>
@@ -257,7 +306,13 @@ export default function DocumentFolderPage() {
   const params = useParams<{ id: string }>()
   const router = useRouter()
   const { data: session } = useSession()
+  const queryClient = useQueryClient()
   const bolId = params.id
+
+  // Hidden file input ref for upload
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [pendingUploadType, setPendingUploadType] = useState<DocType | null>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
 
   const {
     data: documents,
@@ -268,6 +323,50 @@ export default function DocumentFolderPage() {
     queryFn: () => fetchFolderDocuments(bolId),
     enabled: !!bolId,
   })
+
+  // Upload mutation
+  const uploadMutation = useMutation({
+    mutationFn: ({ file, type }: { file: File; type: string }) =>
+      uploadAssociatedDocument(bolId, file, type),
+    onSuccess: () => {
+      setUploadError(null)
+      setPendingUploadType(null)
+      // Invalidate the folder query to refetch immediately
+      queryClient.invalidateQueries({ queryKey: ['bol-folder', bolId] })
+    },
+    onError: (err: Error) => {
+      setUploadError(err.message)
+      setPendingUploadType(null)
+    },
+  })
+
+  // Trigger file picker for a given document type
+  function handleUploadClick(type: DocType) {
+    setUploadError(null)
+    setPendingUploadType(type)
+    // Reset and trigger the hidden input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+      fileInputRef.current.click()
+    }
+  }
+
+  // Handle file selection
+  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file || !pendingUploadType) {
+      setPendingUploadType(null)
+      return
+    }
+
+    if (file.type !== 'application/pdf') {
+      setUploadError('Only PDF files are accepted.')
+      setPendingUploadType(null)
+      return
+    }
+
+    uploadMutation.mutate({ file, type: pendingUploadType })
+  }
 
   // Derive which types are present vs missing
   const presentTypes = new Set(documents?.map((d) => d.type) ?? [])
@@ -325,6 +424,33 @@ export default function DocumentFolderPage() {
 
   return (
     <div className="space-y-6">
+      {/* Hidden file input for PDF uploads */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/pdf"
+        className="hidden"
+        onChange={handleFileChange}
+      />
+
+      {/* Upload error banner */}
+      {uploadError && (
+        <div className="flex items-center gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm text-red-700">{uploadError}</p>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setUploadError(null)}
+            className="text-red-500"
+          >
+            Dismiss
+          </Button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="icon" onClick={() => router.back()}>
@@ -385,7 +511,13 @@ export default function DocumentFolderPage() {
         {nonBolDocs
           .filter((d) => UPLOAD_TYPES.includes(d.type))
           .map((doc) => (
-            <DocumentCard key={doc._id} doc={doc} bolId={bolId} />
+            <DocumentCard
+              key={doc._id}
+              doc={doc}
+              bolId={bolId}
+              onReplace={handleUploadClick}
+              isUploading={uploadMutation.isPending && pendingUploadType === doc.type}
+            />
           ))}
 
         {/* Other docs (not in standard categories) */}
@@ -406,7 +538,13 @@ export default function DocumentFolderPage() {
               Missing Documents
             </h3>
             {missingSlots.map((slot) => (
-              <EmptySlot key={slot.type} type={slot.type} label={slot.label} />
+              <EmptySlot
+                key={slot.type}
+                type={slot.type}
+                label={slot.label}
+                onUpload={handleUploadClick}
+                isUploading={uploadMutation.isPending && pendingUploadType === slot.type}
+              />
             ))}
           </>
         )}

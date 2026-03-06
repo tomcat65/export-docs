@@ -48,6 +48,7 @@ export const routes = {
       updateDate: (id: string) => `/api/documents/${id}/update-date`,
       updateDetails: (id: string) => `/api/documents/${id}/update-details`,
       folderDocs: (id: string) => `/api/documents/${id}/documents`,
+      uploadAssociated: (id: string) => `/api/documents/${id}/upload-associated`,
       generate: {
         coo: (id: string) => `/api/documents/${id}/generate/coo`,
         pl: (id: string) => `/api/documents/${id}/generate/pl`,
