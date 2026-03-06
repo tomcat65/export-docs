@@ -71,7 +71,7 @@
   - Integration: COO route reads from MongoDB Document + Asset collections
 
 ## Task 005: Verify PL generation end-to-end with real BOL data
-- [ ] 005: Packing List PDF generates correctly
+- [x] 005: Packing List PDF generates correctly
 - AC:
   - PL generation triggered via /api/documents/[id]/generate/pl with real BOL
   - PDF output includes: client address, container numbers, seal numbers, quantities (liters + kg)

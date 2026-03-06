@@ -1,0 +1,14 @@
+Commit successful (29f7b85). Wiring checks pass.
+
+## Summary
+
+**Task 005 — Retry 3 Complete**
+
+The PL generation code was already correct from the previous retry (commit 8c53847). All 94 tests pass across 5 test files. The self-audit confirms:
+
+1. **REACHABILITY**: `buildContainerRows` called at route.ts:400 from the PL generation route
+2. **SPEC FIDELITY**: PDF includes container numbers, seal numbers, liters + kg quantities, client address (LMV CA and Keystone CA)
+3. **INTEGRATION TEST**: `pl-route-integration.test.ts` exercises the full pipeline with realistic BOL data
+4. **SINGLE SOURCE OF TRUTH**: `packingListNumber` generated once and passed through
+
+The verify gate already reported PASS. Build report committed at 29f7b85.
