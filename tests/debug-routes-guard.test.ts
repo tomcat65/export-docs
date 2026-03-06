@@ -60,13 +60,13 @@ describe('Integration: Debug route handler returns 404 in production', () => {
   const originalNodeEnv = process.env.NODE_ENV
 
   afterEach(() => {
-    process.env.NODE_ENV = originalNodeEnv
+    ;(process.env as any).NODE_ENV = originalNodeEnv
   })
 
   it('anthropic-debug GET returns 404 when NODE_ENV=production', async () => {
     // We import the actual route handler and call it with NODE_ENV=production
     // This is a true integration test - calling the exported handler directly
-    process.env.NODE_ENV = 'production'
+    ;(process.env as any).NODE_ENV = 'production'
 
     // Dynamic import to get the route handler
     const { GET } = await import('../src/app/api/debug/anthropic-debug/route')
@@ -80,7 +80,7 @@ describe('Integration: Debug route handler returns 404 in production', () => {
   })
 
   it('anthropic-debug GET returns non-404 when NODE_ENV=development', async () => {
-    process.env.NODE_ENV = 'development'
+    ;(process.env as any).NODE_ENV = 'development'
 
     const { GET } = await import('../src/app/api/debug/anthropic-debug/route')
 
