@@ -1,0 +1,38 @@
+# SPECTRA Task Tracking — docu-export
+
+## Level: 2
+## Generated: 2026-03-05
+
+### Status Legend
+- `[ ]` Pending
+- `[x]` Complete (verified)
+- `STUCK:NNN` Blocked — needs decomposition
+- `RETRY:NNN` Failed verification — will retry
+
+### Task Manifest
+
+#### Task 001: <!-- Title -->
+- **Story**: `.spectra/stories/001-*.md`
+- **Status**: `[ ]`
+- **Acceptance Criteria**:
+  - [ ] <!-- Criterion 1 -->
+  - [ ] <!-- Criterion 2 -->
+- **Files**: <!-- file list -->
+- **Verify**: `<!-- test command -->`
+- **Max Iterations**: 5
+- **Attempts**: 0
+
+---
+
+#### Task 002: <!-- Title -->
+- **Story**: `.spectra/stories/002-*.md`
+- **Status**: `[ ]`
+- **Acceptance Criteria**:
+  - [ ] <!-- Criterion 1 -->
+  - [ ] <!-- Criterion 2 -->
+- **Files**: <!-- file list -->
+- **Verify**: `<!-- test command -->`
+- **Max Iterations**: 8
+- **Attempts**: 0
+
+<!-- Add more tasks as needed -->

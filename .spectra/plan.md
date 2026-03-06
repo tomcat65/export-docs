@@ -1,0 +1,63 @@
+# SPECTRA Execution Plan
+
+## Project: docu-export
+## Level: 2
+## Generated: 2026-03-05
+## Source: .spectra/stories/
+
+---
+
+## Task 001: <!-- Task title -->
+- [ ] 001: <!-- Task title -->
+- AC:
+  - <!-- Acceptance criterion from story -->
+  - <!-- Additional criterion -->
+- Files: <!-- comma-separated files to create/modify -->
+- Verify: `<!-- command that exits 0 on success -->`
+- Risk: low
+- Max-iterations: 5
+- Scope: code
+- File-ownership:
+  - owns: [<!-- files this task creates/modifies exclusively -->]
+  - touches: [<!-- files this task modifies but shares -->]
+  - reads: [<!-- files this task only reads -->]
+- Wiring-proof:
+  - CLI: <!-- exact command path to test manually -->
+  - Integration: <!-- cross-module calls or pipeline assertions -->
+
+## Task 002: <!-- Task title -->
+- [ ] 002: <!-- Task title -->
+- AC:
+  - <!-- Acceptance criterion from story -->
+- Files: <!-- comma-separated files to create/modify -->
+- Verify: `<!-- command that exits 0 on success -->`
+- Risk: medium
+- Max-iterations: 8
+- Scope: code
+- File-ownership:
+  - owns: [<!-- files this task creates/modifies exclusively -->]
+  - touches: [<!-- files this task modifies but shares -->]
+  - reads: [<!-- files this task only reads -->]
+- Wiring-proof:
+  - CLI: <!-- exact command path to test manually -->
+  - Integration: <!-- cross-module calls or pipeline assertions -->
+
+---
+
+## Parallelism Assessment
+- Independent tasks: [none]
+- Sequential dependencies: [001 -> 002]
+- Recommendation: SEQUENTIAL_ONLY
+
+### Verification Protocol
+After each task, the verifier runs:
+1. Task-specific verify command
+2. Full regression test suite
+3. Wiring-proof checks (CLI boundary + import audit + pipeline completeness)
+4. Manual CLI command execution
+
+### Evidence Chain
+Every task completion must include:
+1. Commit hash (from `git rev-parse HEAD`)
+2. Verify command output (test count + pass/fail)
+3. Files created/modified (from `git diff --name-only`)

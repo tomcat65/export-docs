@@ -1,0 +1,32 @@
+version: 1
+generated_at: "2026-03-06T02:49:14Z"
+source:
+  mode: manual
+  producer: interactive-fallback
+bmad:
+  track: bmad_method
+  confidence: 0.5
+  rationale: "bmad_method with complexity triggers (integrations>=4, blast_radius=high, risk:security)"
+  context:
+    language: typescript
+    framework: nextjs
+    domain: web
+    team_size: 1
+    integration_count: 4
+    risk_factors:
+      - security
+      - auth
+      - data-loss
+    compliance: []
+    blast_radius: high
+spectra:
+  level: 3
+  execution_mode: teams
+  mapping_reason: "bmad_method with complexity triggers (integrations>=4, blast_radius=high, risk:security)"
+tuning:
+  verification_intensity: high
+  wiring_depth: full
+  retry_budget: 4
+  scope_default: code
+warnings:
+  - "BMAD unavailable; assessment derived from manual answers"

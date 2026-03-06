@@ -1,0 +1,84 @@
+# Guardrails — docu-export
+
+> Learned Signs from SPECTRA execution. These are hard-won lessons that prevent recurring failure patterns.
+> Updated automatically as verification gates catch issues.
+
+## Signs
+
+### SIGN-001: Integration tests must invoke what they import
+> "Every integration test must invoke every pipeline step it imports — importing a module without calling it is dead code in a test."
+- **Origin**: spectra-healthcheck dry run, Task 5 (Feb 2026)
+- **Pattern**: Builder imports LinearTracker in integration test but never calls create_issue() or update_status()
+- **Prevention**: Before committing integration tests, verify every import has at least one method call + assertion
+
+### SIGN-002: CLI commands need subprocess-level tests
+> "CLI commands must have subprocess-level tests that prove real execution, not just class-level unit tests."
+- **Origin**: spectra-healthcheck dry run, Task 3 (Feb 2026)
+- **Pattern**: Class-level tests pass but CLI crashes at runtime due to missing dependency (PyYAML) or narrow exception handling
+- **Prevention**: Every CLI command wired in __main__.py must have a subprocess test that runs the actual command
+
+### SIGN-003: Lessons must generalize, not just fix
+> "If the spec says A → B → C → D and your test skips B, you've written a unit test with extra steps — not an integration test."
+- **Origin**: spectra-healthcheck dry run, Tasks 3+5 (Feb 2026)
+- **Pattern**: Builder learns specific fix (add CLI tests) but doesn't generalize to broader principle (test all wiring). Same bug class recurs in different form.
+- **Prevention**: After any FAIL, builder must articulate the GENERAL principle, not just the specific fix
+
+### SIGN-004: Lead Drift
+> "Team lead must not write code. If lead implements, escalate immediately."
+- **Origin**: Global guardrail (Feb 2026)
+- **Pattern**: Lead agent edits source files directly instead of delegating to builder
+- **Prevention**: Lead agent must never use Edit/Write tools on source files; delegate all implementation
+
+### SIGN-005: File Collision
+> "No two teammates may edit the same file. Task decomposition must assign file ownership."
+- **Origin**: Global guardrail (Feb 2026)
+- **Pattern**: Two builders assigned to tasks that touch the same file, causing merge conflicts or overwrites
+- **Prevention**: Task decomposition must assign explicit file ownership; lead checks for overlap before assigning
+
+### SIGN-006: Stale Task
+> "If task stays in-progress >10 minutes without output, lead must nudge or reassign."
+- **Origin**: Global guardrail (Feb 2026)
+- **Pattern**: Teammate hangs or loops silently, wasting the entire run budget
+- **Prevention**: Lead monitors task progress and reassigns after timeout threshold
+
+### SIGN-007: Silent Failure
+> "Teammate errors must be surfaced to lead via mailbox. Silent swallowing is a system fault."
+- **Origin**: Global guardrail (Feb 2026)
+- **Pattern**: Teammate encounters error but exits without reporting, leaving lead unaware of the failure
+- **Prevention**: All teammate errors must be communicated to lead before exit
+
+### SIGN-008: Research Before STUCK
+> "Before declaring STUCK on any external blocker (dependency install, build error, missing package, environment issue), the builder must spend at least one research cycle using web search or documentation lookup. Most tooling failures have known solutions — a 30-second search beats a full STUCK escalation."
+- **Origin**: Global guardrail (Feb 2026)
+- **Pattern**: Builder declares STUCK on a researchable problem (e.g., pip install hanging) without attempting any workaround
+- **Prevention**: Mandatory research cycle before any external_blocker STUCK declaration
+
+### SIGN-009: Test Ordering Pollution
+> "Tests that pass in isolation but fail in the full suite indicate test pollution — shared state leaking between test files."
+- **Origin**: Global guardrail (Feb 2026)
+- **Pattern**: Tests modify global state (environment variables, singletons, class attributes) without cleanup, causing downstream test failures
+- **Prevention**: Tests must isolate shared state; use fixtures/teardown to restore original state
+
+<!-- New Signs are appended here as they are discovered -->
+
+# --- Global Signs (propagated from /home/tomcat65/.spectra/guardrails-global.md) ---
+### SIGN-001: Integration tests must invoke what they import
+> "Every integration test must invoke every pipeline step it imports — importing a module without calling it is dead code in a test."
+### SIGN-002: CLI commands need subprocess-level tests
+> "CLI commands must have subprocess-level tests that prove real execution, not just class-level unit tests."
+### SIGN-003: Lessons must generalize, not just fix
+> "If the spec says A -> B -> C -> D and your test skips B, you've written a unit test with extra steps — not an integration test."
+### SIGN-004: Lead Drift
+> "Team lead must not write code. If lead implements, escalate immediately."
+### SIGN-005: File Collision
+> "No two teammates may edit the same file. Task decomposition must assign file ownership."
+### SIGN-006: Stale Task
+> "If task stays in-progress >10 minutes without output, lead must nudge or reassign."
+### SIGN-007: Silent Failure
+> "Teammate errors must be surfaced to lead via mailbox. Silent swallowing is a system fault."
+### SIGN-008: Research Before STUCK
+> "Before declaring STUCK on any external blocker (dependency install, build error, missing package, environment issue), the builder must spend at least one research cycle using web search or documentation lookup. Most tooling failures have known solutions — a 30-second search beats a full STUCK escalation."
+### SIGN-009: Test Ordering Pollution
+> "Tests that pass in isolation but fail in the full suite indicate test pollution — shared state leaking between test files."
+### SIGN-010: Language Blindspot
+> "Wiring proof must cover all languages present in the project. Running Python-only checks on a non-Python project is equivalent to no wiring proof. Prevention: auto-detect language, require profile match or emit WARNING."

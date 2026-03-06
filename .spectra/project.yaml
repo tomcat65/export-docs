@@ -1,0 +1,32 @@
+# SPECTRA v5.1 Project Configuration
+name: docu-export
+level: 2
+created: 2026-03-05
+status: initialized
+spectra_version: "5.1"
+
+# All-Anthropic Agent Roster (Claude Code Tier 2 Subagents)
+agents:
+  planner: spectra-planner     # Opus — generates planning artifacts
+  reviewer: spectra-reviewer   # Sonnet — cross-model plan validation
+  auditor: spectra-auditor     # Haiku — pre-flight Sign scanning
+  builder: spectra-builder     # Opus — task implementation
+  verifier: spectra-verifier   # Opus — independent 4-step audit (read-only)
+
+# Cost Governance (Autonomy Contract §6)
+cost:
+  ceiling: 50.00
+  per_task_budget: 10.00
+  parallelism_budget: 0
+
+# Integrations
+integrations:
+  linear: false
+  slack: false
+
+# Verification Configuration
+verification:
+  wiring_proof: true
+  evidence_chain: true
+  regression_required: true
+  four_step_audit: true
