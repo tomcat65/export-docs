@@ -5,6 +5,10 @@ import { Document } from '@/models/Document'
 import mongoose from 'mongoose'
 
 export async function GET(request: NextRequest) {
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
+
   try {
     // Check authentication
     const session = await auth()

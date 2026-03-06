@@ -3,6 +3,10 @@ import { connectDB } from '@/lib/db';
 import mongoose from 'mongoose';
 
 export async function GET(request: NextRequest) {
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
   try {
     // Connect to database
     await connectDB();

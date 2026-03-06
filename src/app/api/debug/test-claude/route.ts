@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sendTextToClaude, testAnthropicConnection } from '@/lib/anthropic-fetch';
 
 export async function GET(request: NextRequest) {
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
   console.log('Testing Claude API connection...');
   
   try {
