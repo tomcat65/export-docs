@@ -8,69 +8,71 @@ import { initializeApp, getApps } from 'firebase/app';
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from 'firebase/functions';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 
-// Firebase configuration
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-};
+// Lazy Firebase initialization — deferred to first use so that
+// importing this module during Next.js build (when env vars are
+// absent) does not trigger auth/invalid-api-key.
+let _app: ReturnType<typeof initializeApp> | null = null;
+let _functions: ReturnType<typeof getFunctions> | null = null;
+let _emulatorConnected = false;
 
-// Log Firebase config status (without exposing values)
-console.log('Firebase config status:', {
-  hasApiKey: !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  hasAuthDomain: !!process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  hasProjectId: !!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  hasStorageBucket: !!process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  hasMessagingSenderId: !!process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  hasAppId: !!process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-});
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const functions = getFunctions(app, 'us-central1'); // Use us-central1 region to match deployed functions
-const auth = getAuth(app);
-
-// Track auth state
-let currentUser = null;
-if (typeof window !== 'undefined') {
-  onAuthStateChanged(auth, (user) => {
-    currentUser = user;
-    console.log('Firebase auth state changed:', { isSignedIn: !!user });
-  });
+function getFirebaseConfig() {
+  return {
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  };
 }
 
-// Use emulator in development mode
-const isDevelopment = process.env.NODE_ENV === 'development' || process.env.NEXT_PUBLIC_NODE_ENV === 'development';
-const shouldUseEmulator = isDevelopment && process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === 'true';
+function getFirebaseApp() {
+  if (!_app) {
+    const config = getFirebaseConfig();
+    console.log('Firebase config status:', {
+      hasApiKey: !!config.apiKey,
+      hasAuthDomain: !!config.authDomain,
+      hasProjectId: !!config.projectId,
+    });
+    _app = getApps().length ? getApps()[0] : initializeApp(config);
 
-// Log connection mode for debugging
-console.log('Firebase connection mode:', {
-  isDevelopment,
-  shouldUseEmulator,
-  usingEmulator: shouldUseEmulator ? 'Yes - local emulator' : 'No - production Firebase',
-  projectId: firebaseConfig.projectId,
-  functionUrl: `https://us-central1-${firebaseConfig.projectId}.cloudfunctions.net`
-});
-
-if (shouldUseEmulator && typeof window !== 'undefined') {
-  try {
-    // Use the emulator for functions
-    connectFunctionsEmulator(functions, 'localhost', 5001);
-    console.log('Connected to Firebase Functions emulator on localhost:5001');
-  } catch (error) {
-    console.error('Failed to connect to Firebase emulator:', error);
-    console.log('Falling back to production Firebase Functions');
+    // Track auth state on client side
+    if (typeof window !== 'undefined') {
+      const auth = getAuth(_app);
+      onAuthStateChanged(auth, (user) => {
+        console.log('Firebase auth state changed:', { isSignedIn: !!user });
+      });
+    }
   }
-} else {
-  console.log('Using production Firebase Functions at:', `https://us-central1-${firebaseConfig.projectId}.cloudfunctions.net`);
+  return _app;
+}
+
+function getFirebaseFunctions() {
+  if (!_functions) {
+    const app = getFirebaseApp();
+    _functions = getFunctions(app, 'us-central1');
+
+    // Connect emulator in development if configured
+    const isDevelopment = process.env.NODE_ENV === 'development' || process.env.NEXT_PUBLIC_NODE_ENV === 'development';
+    const shouldUseEmulator = isDevelopment && process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === 'true';
+
+    if (shouldUseEmulator && typeof window !== 'undefined' && !_emulatorConnected) {
+      try {
+        connectFunctionsEmulator(_functions, 'localhost', 5001);
+        _emulatorConnected = true;
+        console.log('Connected to Firebase Functions emulator on localhost:5001');
+      } catch (error) {
+        console.error('Failed to connect to Firebase emulator:', error);
+      }
+    }
+  }
+  return _functions;
 }
 
 // Function to get current auth state
 export const getCurrentUser = () => {
-  return auth.currentUser;
+  const app = getFirebaseApp();
+  return getAuth(app).currentUser;
 };
 
 // Define interfaces for the Firebase function response
@@ -135,13 +137,8 @@ export const processBolWithFirebase = async ({
     try {
       console.log(`Processing document with Firebase (attempt ${attempt + 1}/${MAX_RETRIES + 1})...`);
       
-      // Initialize app if not already initialized
-      if (!getApps().length) {
-        initializeApp(firebaseConfig);
-      }
-
-      // Get the function reference
-      const functions = getFunctions();
+      // Get the function reference (lazy-initializes Firebase on first call)
+      const functions = getFirebaseFunctions();
       const processBolDocument = httpsCallable<any, FirebaseFunctionResult>(functions, 'processBolDocument', {
         timeout: 540000, // 9 minutes to match function timeout
       });
@@ -268,7 +265,7 @@ export const testFirebaseConnection = async () => {
     console.log('Testing Firebase connection...');
     
     // Call the Hello World function directly
-    const helloWorld = httpsCallable(functions, 'helloWorld');
+    const helloWorld = httpsCallable(getFirebaseFunctions(), 'helloWorld');
     const result = await helloWorld();
     
     console.log('Firebase connection test result:', result.data);
