@@ -1,12 +1,10 @@
-# CLAUDE.md — SPECTRA Context (auto-generated, do not edit manually)
-# Refreshed by spectra-loop after every task cycle.
+# CLAUDE.md — SPECTRA Context (auto-generated, do not edit)
 
 ## SPECTRA Context
 - Project: docu-export
 - Level: 2
-- Phase: initialized
-- Branch: (not yet started)
-- Spectra Version: 5.1
+- Phase: execution
+- Branch: spectra/run-20260305-212740
 
 ## Active Signs
 > Learned Signs from SPECTRA execution. These are hard-won lessons that prevent recurring failure patterns.
@@ -31,19 +29,28 @@
 > "Tests that pass in isolation but fail in the full suite indicate test pollution — shared state leaking between test files."
 
 ## Non-Goals
-None defined — create .spectra/non-goals.md if needed
+None defined
 
-## Wiring Proof (Mandatory — 5 checks before every commit)
-1. CLI paths — subprocess-level tests prove real execution
-2. Import invocation — every import is actually called (no dead code)
-3. Pipeline completeness — integration tests exercise full chain
-4. Error boundaries — CLI exceptions produce clean messages, not tracebacks
-5. Dependencies declared — every import in requirements/pyproject/package.json
+## Wiring Proof
+All tasks require 5-check wiring proof before commit:
+1. CLI paths — subprocess-level tests
+2. Import invocation — no dead imports
+3. Pipeline completeness — full chain tested
+4. Error boundaries — clean messages, no tracebacks
+5. Dependencies declared — all imports in requirements
 
 ## Evidence Chain
 - Commits: feat(task-N) or fix(task-N)
 - Reports: .spectra/logs/task-N-{build|verify|preflight}.md
 
 ## Plan Status
-- [ ] 001: <!-- Task title -->
-- [ ] 002: <!-- Task title -->
+- [ ] 001: Remove 'use client' directive and audit API key exposure
+- [ ] 002: Replace claude-3-opus-20240229 with env var in fetchFromClaudeDirect
+- [ ] 003: All /api/debug/* routes return 404 in production
+- [ ] 004: COO PDF generates correctly and matches coo-sample.pdf layout
+- [ ] 005: Packing List PDF generates correctly
+- [ ] 006: Dashboard shows all documents per BOL in a single folder view
+- [ ] 007: User can upload Invoice, COA, SED PDFs and associate them to a BOL
+- [ ] 008: Replace button creates new Document record and marks old as superseded
+- [ ] 009: Audit and retire BillOfLading legacy model if unused
+- [ ] 010: Move one-off fix scripts to scripts/archive/ with README

@@ -17,7 +17,9 @@
     "backup:daily": "node scripts/backup/backup-database.js daily",
     "backup:weekly": "node scripts/backup/backup-database.js weekly",
     "backup:monthly": "node scripts/backup/backup-database.js monthly",
-    "backup:scheduler": "node scripts/backup/schedule-backups.js"
+    "backup:scheduler": "node scripts/backup/schedule-backups.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -37,8 +39,9 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
-    "dotenv": "^16.4.7",
+    "global": "^4.4.0",
     "lucide-react": "^0.475.0",
+    "mcp-mongodb-atlas": "^0.1.10",
     "mongoose": "^8.10.1",
     "next": "15.1.7",
     "next-auth": "^4.24.11",
@@ -62,11 +65,15 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^5.1.4",
     "autoprefixer": "^10.0.1",
+    "dotenv": "^16.4.7",
     "eslint": "^9",
     "eslint-config-next": "15.1.7",
+    "firebase": "^11.5.0",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.0.18"
   }
 }

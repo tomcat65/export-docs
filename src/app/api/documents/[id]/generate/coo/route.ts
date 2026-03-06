@@ -4,52 +4,13 @@ import { connectDB } from '@/lib/db'
 import { Document } from '@/models/Document'
 import { Client } from '@/models/Client'
 import { Asset } from '@/models/Asset'
+import { extractProductName, getNextBusinessDay, formatDateFormal, getOrdinalSuffix } from '@/lib/coo-utils'
 import { PDFDocument, rgb, StandardFonts, PDFPage, PDFImage, PDFFont } from 'pdf-lib'
 import mongoose, { Types } from 'mongoose'
 import fs from 'fs'
 import path from 'path'
 import { GridFSBucket } from 'mongodb'
 import { Readable } from 'stream'
-
-// Helper function to extract product name from description
-function extractProductName(description: string): string {
-  if (!description) return '';
-  
-  // Common packaging terms to remove
-  const packagingTerms = [
-    'flexitank', 'flexi tank', 'flexi-tank',
-    'iso tank', 'isotank', 'iso-tank',
-    'drum', 'drums', 'barrel', 'barrels',
-    'container', 'bulk', 'ibc', 'tote'
-  ];
-  
-  // Create a regex pattern to match any packaging term (case insensitive, whole word)
-  const packagingPattern = new RegExp(`\\b(${packagingTerms.join('|')})\\b`, 'gi');
-  
-  // Clean the description by removing packaging terms
-  let cleanedDesc = description
-    // First remove common quantity + packaging patterns
-    .replace(/^\d+\s+(?:FLEXI\s+TANK|FLEXITANK|FLEXI-TANK|IBC|DRUM|DRUMS|CONTAINER|BULK|TOTE)s?\s+/i, '')
-    // Then remove standalone packaging words (without quantities)
-    .replace(packagingPattern, '')
-    // Strip any remaining numeric prefixes that might be part of packaging (e.g. "1 Base Oil")
-    .replace(/^\d+\s+/, '')
-    // Remove any "X" that might appear at the beginning (sometimes used as a count)
-    .replace(/^X\s+/i, '')
-    // Clean up any multiple spaces created by the replacements
-    .replace(/\s+/g, ' ')
-    .trim();
-  
-  console.log(`COO extractProductName transform: "${description}" -> "${cleanedDesc}"`);
-  
-  // If after cleaning we have nothing left, return the original (better than nothing)
-  if (!cleanedDesc && description) {
-    console.log(`Warning: Cleaning removed all text from product name, using original: "${description}"`);
-    return description;
-  }
-  
-  return cleanedDesc;
-}
 
 interface GenerateRequest {
   mode?: 'overwrite' | 'new'
@@ -624,18 +585,7 @@ function drawDocumentFooter(
   const margin = 50; // Set margin to match other sections
   let currentY = yStart; // Start from the yStart position
   const lineHeight = 14; // Define lineHeight constant to match other sections
-  
-  // Helper function for ordinal suffixes
-  const getOrdinalSuffix = (n: number): string => {
-    if (n > 3 && n < 21) return 'th';
-    switch (n % 10) {
-      case 1: return 'st';
-      case 2: return 'nd';
-      case 3: return 'rd';
-      default: return 'th';
-    }
-  };
-  
+
   // Start the footer section - position properly
   let footerCurrentY = 115;
   
@@ -1026,67 +976,11 @@ export async function POST(
       daysDifference: Math.floor((businessDateObj.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
     });
 
-    // Get the next business day (excluding weekends)
-    const getNextBusinessDay = (date: Date): Date => {
-      // Force a copy to ensure we don't modify the original date
-      console.log("🔄 getNextBusinessDay input date:", date.toISOString(), "source:", dateSource);
-      
-      // We intentionally use the BOL date even if it's in the future
-      // This ensures consistent behavior for all documents
-      const result = new Date(date.getTime()); // Create a proper copy
-      result.setDate(result.getDate() + 1);
-      
-      // If it's a weekend (0 = Sunday, 6 = Saturday), adjust to the next business day
-      if (result.getDay() === 0) { // Sunday
-        result.setDate(result.getDate() + 1); // Move to Monday
-      } else if (result.getDay() === 6) { // Saturday
-        result.setDate(result.getDate() + 2); // Move to Monday
-      }
-      
-      console.log("✅ getNextBusinessDay output date:", result.toISOString());
-      return result;
-    };
-    
-    // Update businessDateObj to the next business day
+    // Update businessDateObj to the next business day (uses imported utility)
     businessDateObj = getNextBusinessDay(businessDateObj);
-    console.log("Next business day:", {
-      date: businessDateObj.toISOString(),
-      year: businessDateObj.getFullYear(),
-      month: businessDateObj.getMonth() + 1, 
-      day: businessDateObj.getDate(),
-      weekday: businessDateObj.getDay(),
-      source: dateSource,
-      isFutureDate: businessDateObj > now ? "yes" : "no"
-    });
 
-    const formatDateFormal = (date: Date): string => {
-      console.log("📅 formatDateFormal input date:", date.toISOString(), "source:", dateSource);
-      
-      const day = date.getDate();
-      const month = date.toLocaleString('default', { month: 'long' });
-      const year = date.getFullYear();
-      // Day of week is no longer needed
-      // const dayOfWeek = date.toLocaleString('default', { weekday: 'long' });
-
-      const getOrdinalSuffix = (n: number): string => {
-        if (n > 3 && n < 21) return 'th';
-        switch (n % 10) {
-          case 1: return 'st';
-          case 2: return 'nd';
-          case 3: return 'rd';
-          default: return 'th';
-        }
-      };
-
-      // New format: "Month, Day Year" (e.g., "December, 26th 2025")
-      const formatted = `${month}, ${day}${getOrdinalSuffix(day)} ${year}`;
-      console.log("🔤 formatDateFormal result:", formatted);
-      return formatted;
-    };
-
-    // Store the formatted date for consistent use throughout the document
+    // Store the formatted date for consistent use throughout the document (uses imported utility)
     const formattedBusinessDay = formatDateFormal(businessDateObj);
-    console.log("📝 FINAL DATE TO BE USED IN COO:", formattedBusinessDay);
     
     // Load logo
     let logoPath;
@@ -1123,82 +1017,95 @@ export async function POST(
     let notarySignatureImage;
     if (notarySignatureBuffer) {
       notarySignatureImage = await pdfDoc.embedJpg(notarySignatureBuffer);
+    } else {
+      console.error('Notary signature asset (Notary_signature.jpg) not found in GridFS assets bucket');
+      return NextResponse.json(
+        { error: 'Missing required asset: Notary signature (Notary_signature.jpg). Please upload it via the Assets page before generating a COO.' },
+        { status: 422 }
+      )
     }
 
     // Load signature and notary assets
     let signatureImage, notarySealImage;
-    try {
-      // Get the first name from the user's full name to search for their signature
-      const firstName = session.user?.name?.split(' ')[0] || '';
-      
-      const signatures = await Asset.find({ 
-        type: 'signature', 
-        name: { $regex: new RegExp(firstName, 'i') } 
-      });
-      
-      const signature = signatures.length > 0 
-        ? signatures[Math.floor(Math.random() * signatures.length)] 
-        : await Asset.findOne({ type: 'signature' });
-      
-      const notarySeal = await Asset.findOne({ type: 'notary_seal' });
-      
-      if (mongoose.connection.db) {
-        const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-          bucketName: 'assets'
-        });
-        
-        // Process signature
-        if (signature) {
-          const fileId = typeof signature.fileId === 'string' 
-            ? new mongoose.Types.ObjectId(signature.fileId)
-            : signature.fileId;
-            
-          const downloadStream = bucket.openDownloadStream(fileId);
-          
-          // Convert stream to buffer
-          const chunks: Buffer[] = [];
-          for await (const chunk of downloadStream) {
-            chunks.push(Buffer.from(chunk));
-          }
-          const buffer = Buffer.concat(chunks);
-          
-          // Embed signature image
-          if (signature.contentType.startsWith('image/')) {
-            if (signature.contentType === 'image/png') {
-              signatureImage = await pdfDoc.embedPng(buffer);
-            } else if (signature.contentType === 'image/jpeg' || signature.contentType === 'image/jpg') {
-              signatureImage = await pdfDoc.embedJpg(buffer);
-            }
-          }
-        }
-        
-        // Process notary seal if available
-        if (notarySeal) {
-          const fileId = typeof notarySeal.fileId === 'string' 
-            ? new mongoose.Types.ObjectId(notarySeal.fileId)
-            : notarySeal.fileId;
-            
-          const downloadStream = bucket.openDownloadStream(fileId);
-          
-          // Convert stream to buffer
-          const chunks: Buffer[] = [];
-          for await (const chunk of downloadStream) {
-            chunks.push(Buffer.from(chunk));
-          }
-          const buffer = Buffer.concat(chunks);
-          
-          // Embed notary seal image
-          if (notarySeal.contentType.startsWith('image/')) {
-            if (notarySeal.contentType === 'image/png') {
-              notarySealImage = await pdfDoc.embedPng(buffer);
-            } else if (notarySeal.contentType === 'image/jpeg' || notarySeal.contentType === 'image/jpg') {
-              notarySealImage = await pdfDoc.embedJpg(buffer);
-            }
-          }
-        }
+
+    // Get the first name from the user's full name to search for their signature
+    const firstName = session.user?.name?.split(' ')[0] || '';
+
+    const signatures = await Asset.find({
+      type: 'signature',
+      name: { $regex: new RegExp(firstName, 'i') }
+    });
+
+    const signature = signatures.length > 0
+      ? signatures[Math.floor(Math.random() * signatures.length)]
+      : await Asset.findOne({ type: 'signature' });
+
+    if (!signature) {
+      return NextResponse.json(
+        { error: `Missing required asset: No signature found for user "${session.user?.name || 'unknown'}". Please upload a signature asset before generating a COO.` },
+        { status: 422 }
+      )
+    }
+
+    const notarySeal = await Asset.findOne({ type: 'notary_seal' });
+    if (!notarySeal) {
+      return NextResponse.json(
+        { error: 'Missing required asset: Notary seal not found. Please upload a notary_seal asset before generating a COO.' },
+        { status: 422 }
+      )
+    }
+
+    if (!mongoose.connection.db) {
+      return NextResponse.json(
+        { error: 'Database connection not available for loading assets' },
+        { status: 500 }
+      )
+    }
+
+    const assetDownloadBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
+      bucketName: 'assets'
+    });
+
+    // Process signature
+    const sigFileId = typeof signature.fileId === 'string'
+      ? new mongoose.Types.ObjectId(signature.fileId)
+      : signature.fileId;
+
+    const sigDownloadStream = assetDownloadBucket.openDownloadStream(sigFileId);
+
+    const sigChunks: Buffer[] = [];
+    for await (const chunk of sigDownloadStream) {
+      sigChunks.push(Buffer.from(chunk));
+    }
+    const sigBuffer = Buffer.concat(sigChunks);
+
+    if (signature.contentType.startsWith('image/')) {
+      if (signature.contentType === 'image/png') {
+        signatureImage = await pdfDoc.embedPng(sigBuffer);
+      } else if (signature.contentType === 'image/jpeg' || signature.contentType === 'image/jpg') {
+        signatureImage = await pdfDoc.embedJpg(sigBuffer);
       }
-    } catch (error) {
-      console.error('Error embedding signature/notary assets:', error);
+    }
+
+    // Process notary seal
+    const sealFileId = typeof notarySeal.fileId === 'string'
+      ? new mongoose.Types.ObjectId(notarySeal.fileId)
+      : notarySeal.fileId;
+
+    const sealDownloadStream = assetDownloadBucket.openDownloadStream(sealFileId);
+
+    const sealChunks: Buffer[] = [];
+    for await (const chunk of sealDownloadStream) {
+      sealChunks.push(Buffer.from(chunk));
+    }
+    const sealBuffer = Buffer.concat(sealChunks);
+
+    if (notarySeal.contentType.startsWith('image/')) {
+      if (notarySeal.contentType === 'image/png') {
+        notarySealImage = await pdfDoc.embedPng(sealBuffer);
+      } else if (notarySeal.contentType === 'image/jpeg' || notarySeal.contentType === 'image/jpg') {
+        notarySealImage = await pdfDoc.embedJpg(sealBuffer);
+      }
     }
 
     // Helper functions for drawing
