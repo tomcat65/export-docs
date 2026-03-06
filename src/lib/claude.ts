@@ -1,4 +1,3 @@
-'use client'
 import { processDocumentWithClaude as processWithClaude } from './anthropic-fetch';
 import type { AnthropicResponse } from './anthropic-fetch';
 
