@@ -128,7 +128,8 @@ exports.processBolDocument = functions
           // Process document with Claude
           const result = await processDocumentWithClaude({
             type: data.fileType.includes("pdf") ? "pdf" : "image",
-            data: data.fileContent
+            data: data.fileContent,
+            mimeType: data.fileType
           });
           
           // Upload the document to Firebase Storage
