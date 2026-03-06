@@ -14,6 +14,7 @@ const ALLOWED_TYPES = ['INVOICE_EXPORT', 'COA', 'SED'] as const
 
 const uploadSchema = z.object({
   type: z.enum(ALLOWED_TYPES),
+  replaceDocId: z.string().optional(),
 })
 
 /**
@@ -49,6 +50,7 @@ export async function POST(
     const formData = await request.formData()
     const file = formData.get('file') as File | null
     const rawType = formData.get('type') as string | null
+    const rawReplaceDocId = formData.get('replaceDocId') as string | null
 
     if (!file) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 })
@@ -63,7 +65,10 @@ export async function POST(
     }
 
     // --- Validate type with Zod ---
-    const parsed = uploadSchema.safeParse({ type: rawType })
+    const parsed = uploadSchema.safeParse({
+      type: rawType,
+      replaceDocId: rawReplaceDocId ?? undefined,
+    })
     if (!parsed.success) {
       return NextResponse.json(
         {
@@ -73,7 +78,7 @@ export async function POST(
         { status: 400 }
       )
     }
-    const { type: docType } = parsed.data
+    const { type: docType, replaceDocId } = parsed.data
 
     // --- DB connection ---
     await connectDB()
@@ -130,6 +135,29 @@ export async function POST(
         .on('finish', () => resolve())
     })
 
+    // --- Validate replaceDocId if provided ---
+    if (replaceDocId) {
+      if (!mongoose.Types.ObjectId.isValid(replaceDocId)) {
+        return NextResponse.json(
+          { error: 'Invalid replaceDocId format' },
+          { status: 400 }
+        )
+      }
+      const oldDoc = await Document.findById(replaceDocId).lean()
+      if (!oldDoc) {
+        return NextResponse.json(
+          { error: 'Document to replace not found' },
+          { status: 404 }
+        )
+      }
+      if ((oldDoc as any).type !== docType) {
+        return NextResponse.json(
+          { error: 'Replacement document type must match the original' },
+          { status: 400 }
+        )
+      }
+    }
+
     // --- Create Document record ---
     const newDocument = await Document.create({
       clientId,
@@ -138,7 +166,16 @@ export async function POST(
       type: docType,
       subType: docType === 'INVOICE_EXPORT' ? 'EXPORT' : undefined,
       relatedBolId: bolObjectId,
+      status: 'active',
     })
+
+    // --- Mark old document as superseded (if replacing) ---
+    if (replaceDocId) {
+      await Document.findByIdAndUpdate(replaceDocId, {
+        status: 'superseded',
+        supersededBy: newDocument._id,
+      })
+    }
 
     return NextResponse.json({
       success: true,

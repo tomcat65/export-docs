@@ -71,6 +71,8 @@ export interface IDocument {
       lbs: string
     }
   }
+  status?: 'active' | 'superseded'
+  supersededBy?: mongoose.Types.ObjectId
   createdAt: Date
   updatedAt: Date
 }
@@ -173,7 +175,17 @@ const documentSchema = new mongoose.Schema<IDocument>({
       kg: String,
       lbs: String
     }
-  }
+  },
+  status: {
+    type: String,
+    enum: ['active', 'superseded'],
+    default: 'active',
+  },
+  supersededBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Document',
+    required: false,
+  },
 }, {
   timestamps: true
 });
@@ -182,6 +194,7 @@ const documentSchema = new mongoose.Schema<IDocument>({
 documentSchema.index({ clientId: 1, type: 1 });
 documentSchema.index({ 'bolData.bolNumber': 1 });
 documentSchema.index({ relatedBolId: 1 });
+documentSchema.index({ relatedBolId: 1, status: 1 });
 
 // Create and export the model, safely handling HMR
 export const Document = mongoose.models.Document 

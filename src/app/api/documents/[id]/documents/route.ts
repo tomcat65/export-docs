@@ -86,7 +86,11 @@ export async function GET(
     }
 
     // Find all related documents (COO, PL, Invoice, COA, SED, etc.)
-    const relatedDocs = await Document.find({ relatedBolId: bolObjectId })
+    // Exclude superseded documents — only show latest active version per type
+    const relatedDocs = await Document.find({
+      relatedBolId: bolObjectId,
+      status: { $ne: 'superseded' },
+    })
       .sort({ type: 1, createdAt: -1 })
       .lean()
 
@@ -102,6 +106,8 @@ export async function GET(
       type: doc.type,
       subType: doc.subType,
       relatedBolId: doc.relatedBolId?.toString(),
+      status: doc.status ?? 'active',
+      supersededBy: doc.supersededBy?.toString() ?? null,
       createdAt: doc.createdAt instanceof Date ? doc.createdAt.toISOString() : doc.createdAt,
       updatedAt: doc.updatedAt instanceof Date ? doc.updatedAt.toISOString() : doc.updatedAt,
       bolData: serializeObjectIds(doc.bolData),

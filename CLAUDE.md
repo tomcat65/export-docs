@@ -50,7 +50,7 @@ All tasks require 5-check wiring proof before commit:
 - [x] 004: COO PDF generates correctly and matches coo-sample.pdf layout
 - [x] 005: Packing List PDF generates correctly
 - [x] 006: Dashboard shows all documents per BOL in a single folder view
-- [ ] 007: User can upload Invoice, COA, SED PDFs and associate them to a BOL
+- [x] 007: User can upload Invoice, COA, SED PDFs and associate them to a BOL
 - [ ] 008: Replace button creates new Document record and marks old as superseded
 - [ ] 009: Audit and retire BillOfLading legacy model if unused
 - [ ] 010: Move one-off fix scripts to scripts/archive/ with README

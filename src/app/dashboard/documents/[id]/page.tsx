@@ -137,11 +137,15 @@ async function fetchFolderDocuments(bolId: string): Promise<FolderDocument[]> {
 async function uploadAssociatedDocument(
   bolId: string,
   file: File,
-  type: string
+  type: string,
+  replaceDocId?: string | null,
 ): Promise<{ success: boolean; document: FolderDocument }> {
   const formData = new FormData()
   formData.append('file', file)
   formData.append('type', type)
+  if (replaceDocId) {
+    formData.append('replaceDocId', replaceDocId)
+  }
 
   const res = await fetch(routes.api.documents.uploadAssociated(bolId), {
     method: 'POST',
@@ -166,7 +170,7 @@ function DocumentCard({
 }: {
   doc: FolderDocument
   bolId: string
-  onReplace?: (type: DocType) => void
+  onReplace?: (type: DocType, replaceDocId: string) => void
   isUploading?: boolean
 }) {
   const isGenerated = GENERATED_TYPES.includes(doc.type)
@@ -243,7 +247,7 @@ function DocumentCard({
             variant="ghost"
             size="sm"
             disabled={isUploading}
-            onClick={() => onReplace(doc.type)}
+            onClick={() => onReplace(doc.type, doc._id)}
           >
             {isUploading ? (
               <Loader2 className="h-4 w-4 mr-1 animate-spin" />
@@ -312,6 +316,7 @@ export default function DocumentFolderPage() {
   // Hidden file input ref for upload
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [pendingUploadType, setPendingUploadType] = useState<DocType | null>(null)
+  const [pendingReplaceDocId, setPendingReplaceDocId] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
 
   const {
@@ -326,24 +331,27 @@ export default function DocumentFolderPage() {
 
   // Upload mutation
   const uploadMutation = useMutation({
-    mutationFn: ({ file, type }: { file: File; type: string }) =>
-      uploadAssociatedDocument(bolId, file, type),
+    mutationFn: ({ file, type, replaceDocId }: { file: File; type: string; replaceDocId?: string | null }) =>
+      uploadAssociatedDocument(bolId, file, type, replaceDocId),
     onSuccess: () => {
       setUploadError(null)
       setPendingUploadType(null)
+      setPendingReplaceDocId(null)
       // Invalidate the folder query to refetch immediately
       queryClient.invalidateQueries({ queryKey: ['bol-folder', bolId] })
     },
     onError: (err: Error) => {
       setUploadError(err.message)
       setPendingUploadType(null)
+      setPendingReplaceDocId(null)
     },
   })
 
-  // Trigger file picker for a given document type
-  function handleUploadClick(type: DocType) {
+  // Trigger file picker for a given document type (with optional replace)
+  function handleUploadClick(type: DocType, replaceDocId?: string) {
     setUploadError(null)
     setPendingUploadType(type)
+    setPendingReplaceDocId(replaceDocId ?? null)
     // Reset and trigger the hidden input
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
@@ -365,7 +373,7 @@ export default function DocumentFolderPage() {
       return
     }
 
-    uploadMutation.mutate({ file, type: pendingUploadType })
+    uploadMutation.mutate({ file, type: pendingUploadType, replaceDocId: pendingReplaceDocId })
   }
 
   // Derive which types are present vs missing
