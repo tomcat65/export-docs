@@ -1,8 +1,8 @@
 ## SPECTRA v5.0 Run Status
-- Current Task: 005
-- Task Title: Verify PL generation end-to-end with real BOL data
-- Iteration: 3 / 4
-- Elapsed Time: 01:19:03
-- Pass History: 006, Task 004: FAIL->PASS, Task 001: PASS
+- Current Task: 007
+- Task Title: BOL Document Folder — upload associated documents
+- Iteration: 1 / 4
+- Elapsed Time: 01:27:43
+- Pass History: 006, Task 004: FAIL->PASS, Task 001: PASS, Task 005: FAIL->PASS
 - Current Agent: verifier
-- Last Updated: 2026-03-06T13:29:31Z
+- Last Updated: 2026-03-06T13:38:11Z

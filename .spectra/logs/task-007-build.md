@@ -1,0 +1,18 @@
+## Build Report — Task 007: BOL Document Folder — upload associated documents
+- Commit: 017826a
+- Tests: 31/31 passing (task), 149/149 passing (full suite)
+- Wiring Proof: 5/5 checks passed
+- New Files:
+  - src/app/api/documents/[id]/upload-associated/route.ts
+  - tests/upload-associated.test.ts
+- Modified Files:
+  - src/lib/routes.ts (added uploadAssociated route)
+  - src/app/dashboard/documents/[id]/page.tsx (wired Upload/Replace buttons with useMutation)
+- Dependencies Added: none (zod already in package.json)
+- Notes:
+  - API validates inputs with Zod (type enum) and checks PDF content type
+  - clientId inherited from parent BOL — no client ID in request payload
+  - GridFS upload uses same bucket name ('documents') as existing upload routes
+  - Folder view invalidates TanStack Query cache on successful upload for immediate refresh
+  - Replace button wired for Task 008 supersede flow (currently creates new doc alongside old)
+  - TypeScript compiles clean (npx tsc --noEmit)

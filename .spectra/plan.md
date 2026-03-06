@@ -111,7 +111,7 @@
 
 
 ## Task 007: BOL Document Folder — upload associated documents
-- [ ] 007: User can upload Invoice, COA, SED PDFs and associate them to a BOL
+- [x] 007: User can upload Invoice, COA, SED PDFs and associate them to a BOL
 - AC:
   - Upload button per document slot opens file picker (PDF only)
   - On upload: file stored in GridFS, Document record created with correct type + relatedBolId

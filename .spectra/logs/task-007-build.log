@@ -1,0 +1,25 @@
+Task 007 is complete. Here's a summary:
+
+**What was built:**
+
+1. **API Route** (`POST /api/documents/[id]/upload-associated`):
+   - Admin auth required
+   - Zod schema validates `type` must be `INVOICE_EXPORT | COA | SED`
+   - PDF-only file validation
+   - Finds parent BOL document, inherits its `clientId`
+   - Stores file in GridFS (bucket: `documents`)
+   - Creates Document record with `relatedBolId` linking to parent BOL
+   - Returns serialized document on success, clear error messages on failure
+
+2. **UI Updates** (folder view page):
+   - Upload button on empty slots now opens file picker (PDF only)
+   - Replace button on existing upload-only docs triggers same upload flow
+   - `useMutation` sends `FormData` to upload-associated endpoint
+   - Query cache invalidated on success → document appears immediately
+   - Error banner with dismiss button for upload failures
+   - Loading spinner on active upload button
+
+3. **Wiring** (`routes.ts`):
+   - Added `uploadAssociated: (id) => /api/documents/${id}/upload-associated`
+
+**Results:** 31 new tests + 149 total passing, TypeScript clean, wiring proof passed.
