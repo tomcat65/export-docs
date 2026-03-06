@@ -479,7 +479,7 @@ async function fetchFromClaudeDirect(document: { type: 'pdf' | 'image', data: st
       `This is an image of a bill of lading. Extract all the relevant information from it: ${document.data}`;
 
   const payload = {
-    model: "claude-3-opus-20240229",
+    model: process.env.ANTHROPIC_MODEL ?? 'claude-opus-4-6',
     max_tokens: 4000,
     temperature: 0.0,
     system: systemPrompt,

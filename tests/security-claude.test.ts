@@ -21,6 +21,15 @@ describe('Security: src/lib/claude.ts', () => {
     expect(claudeFileContent).not.toMatch(/sk-ant-[a-zA-Z0-9]+/)
   })
 
+  it('should NOT contain hardcoded claude-3-opus-20240229 model string', () => {
+    expect(claudeFileContent).not.toContain('claude-3-opus-20240229')
+  })
+
+  it('should use ANTHROPIC_MODEL env var with claude-opus-4-6 default', () => {
+    // The model must be read from env with a fallback
+    expect(claudeFileContent).toContain("process.env.ANTHROPIC_MODEL ?? 'claude-opus-4-6'")
+  })
+
   it('should not be imported by any client component', () => {
     // Scan src/ for any file that has 'use client' and imports from claude.ts
     const srcDir = path.resolve(__dirname, '../src')
