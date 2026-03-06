@@ -33,6 +33,11 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# secret-bearing scripts (never commit)
+set-env.js
+set-env.cjs
+check-mongodb.js
+
 # vercel
 .vercel
 
