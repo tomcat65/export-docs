@@ -82,3 +82,25 @@
 > "Tests that pass in isolation but fail in the full suite indicate test pollution — shared state leaking between test files."
 ### SIGN-010: Language Blindspot
 > "Wiring proof must cover all languages present in the project. Running Python-only checks on a non-Python project is equivalent to no wiring proof. Prevention: auto-detect language, require profile match or emit WARNING."
+
+---
+## Planning Warnings (resolved 2026-03-06)
+
+W1 RESOLVED: `claude-opus-4-6` IS a valid Anthropic model string (confirmed).
+  Use it in S0-2. Story updated.
+
+W2 RESOLVED: S2-3 replace-document uses SUPERSEDE approach (not overwrite).
+  Old GridFS file kept. New Document record created. Old record gets status:'superseded'.
+  Story updated. Aligned with constitution data integrity rule.
+
+W3 RESOLVED: S3-1 updated — git checkpoint commit required BEFORE any deletion.
+  grep must cover both static imports and dynamic require() patterns. Story updated.
+
+W4 RESOLVED: S4-2 updated — explicit fixture anonymization rules added.
+  Real BOL numbers → 000000000, container numbers → XXXX0000000, client names → Test Client CA.
+  Fixtures stored in tests/fixtures/, never commit real PII. Story updated.
+
+W5 ACKNOWLEDGED: S1 (COO+PL verification) requires manual confirmation by Tommy.
+  The loop will PAUSE after S1 tasks and wait for Tommy to confirm PDF output
+  looks correct before marking S1 DONE. This is intentional — visual QA cannot
+  be automated for document layout verification.

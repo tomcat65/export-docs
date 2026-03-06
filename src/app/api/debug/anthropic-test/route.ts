@@ -42,11 +42,13 @@ export async function GET(request: NextRequest) {
     
     const response = await anthropic.messages.create({
       model: 'claude-3-7-sonnet-20250219',
-      max_tokens: 30,
+      max_tokens: 1000,
+      temperature: 0,
+      system: 'You are a helpful AI assistant.',
       messages: [
         {
           role: 'user',
-          content: 'Say hello - this is a test message'
+          content: 'Hello, Claude! Can you write a short poem about the ocean?'
         }
       ]
     });
@@ -153,11 +155,8 @@ export async function GET(request: NextRequest) {
       success: false,
       error: error.message
     };
-    console.error('Fetch both methods test failed:', error);
+    console.error('Fetch both auth methods test failed:', error);
   }
   
-  return NextResponse.json({
-    api_key_format: apiKey.substring(0, 10) + '...',
-    results
-  });
-} 
+  return NextResponse.json(results);
+}

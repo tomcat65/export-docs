@@ -78,6 +78,31 @@ export async function DELETE(
           
         await deleteDocumentAndFile(relatedDoc._id, relatedFileId)
       }
+      
+      // Also check for any other documents with the same BOL number that might cause duplicates
+      if (document.bolData?.bolNumber) {
+        console.log(`Checking for duplicate data with BOL number: ${document.bolData.bolNumber}`)
+        
+        // Find other documents with the same BOL number
+        const duplicateBols = await Document.find({
+          _id: { $ne: document._id }, // Not the current document
+          'bolData.bolNumber': document.bolData.bolNumber,
+          type: 'BOL'
+        })
+        
+        console.log(`Found ${duplicateBols.length} duplicate BOL documents with the same number`)
+        
+        // Delete each duplicate
+        for (const dupDoc of duplicateBols) {
+          console.log(`Deleting duplicate BOL document: ${dupDoc._id}`)
+          
+          const dupFileId = typeof dupDoc.fileId === 'string' 
+            ? new mongoose.Types.ObjectId(dupDoc.fileId)
+            : dupDoc.fileId
+            
+          await deleteDocumentAndFile(dupDoc._id, dupFileId)
+        }
+      }
     }
 
     // Delete the original document and its file

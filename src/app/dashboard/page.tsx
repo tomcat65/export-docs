@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { useState, useEffect } from 'react'
 import { BolUploadSection } from '@/components/bol-upload-section'
 import { routes } from '@/lib/routes'
+import { AdminTools } from "./components/AdminTools";
 
 interface Client {
   id: string;
@@ -75,6 +76,11 @@ export default function DashboardPage() {
               ))}
             </div>
           </div>
+
+          <section className="mt-8">
+            <h2 className="text-2xl font-semibold mb-4">Admin Tools</h2>
+            <AdminTools />
+          </section>
         </div>
       )}
     </div>

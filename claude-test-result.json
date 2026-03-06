@@ -1,0 +1,68 @@
+{
+  "success": true,
+  "storageError": "Failed to save document to storage after multiple attempts",
+  "document": {
+    "bolNumber": "MSCUQR736031",
+    "fileName": "booking 246977717 BoL's.pdf",
+    "clientId": "67bd0efbbf7daebc63d0ca0a",
+    "shipmentDetails": {
+      "bolNumber": "MSCUQR736031",
+      "bookingNumber": "QR736031",
+      "carrierReference": "",
+      "vesselName": "MSC MELISSA",
+      "voyageNumber": "QR736",
+      "portOfLoading": "JEBEL ALI, UNITED ARAB EMIRATES",
+      "portOfDischarge": "HOUSTON, TX",
+      "dateOfIssue": "23-DEC-2023",
+      "shipmentDate": "24-DEC-2023"
+    },
+    "parties": {
+      "shipper": {
+        "name": "DOCUMENT BROKER",
+        "address": "222 BROKER STREET\nDUBAI, UAE",
+        "taxId": ""
+      },
+      "consignee": {
+        "name": "DOCUMENT BROKER",
+        "address": "123 BROKER AVENUE\nHOUSTON, TX 77001\nUSA",
+        "taxId": ""
+      },
+      "notifyParty": {
+        "name": "SAME AS CONSIGNEE",
+        "address": ""
+      }
+    },
+    "containers": [
+      {
+        "containerNumber": "MSCU1234567",
+        "sealNumber": "MSC123456",
+        "type": "DRY",
+        "product": {
+          "name": "INDUSTRIAL EQUIPMENT",
+          "description": "INDUSTRIAL EQUIPMENT AND PARTS",
+          "hsCode": ""
+        },
+        "quantity": {
+          "volume": {
+            "liters": 0,
+            "gallons": 0
+          },
+          "weight": {
+            "kg": 15000,
+            "lbs": 33069,
+            "mt": 15
+          }
+        }
+      }
+    ],
+    "commercial": {
+      "currency": "USD",
+      "freightTerms": "PREPAID",
+      "itnNumber": "",
+      "totalWeight": {
+        "kg": "15000",
+        "lbs": "33069"
+      }
+    }
+  }
+}

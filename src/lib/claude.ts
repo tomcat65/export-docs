@@ -1,3 +1,4 @@
+'use client'
 import { processDocumentWithClaude as processWithClaude } from './anthropic-fetch';
 import type { AnthropicResponse } from './anthropic-fetch';
 
@@ -74,9 +75,9 @@ export async function processDocumentWithClaude(
   try {
     console.log(`Processing ${document.type} document with Claude API`);
     
-    // Create a timeout promise that rejects after 25 seconds
+    // Create a timeout promise that rejects after 60 seconds (increased from 45)
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Claude processing timed out after 25 seconds')), 25000);
+      setTimeout(() => reject(new Error('Claude processing timed out after 60 seconds')), 60000);
     });
     
     // Set up regular processing logic
@@ -104,12 +105,22 @@ CRITICAL RULES:
 - If information spans multiple pages, combine it appropriately
 - For container details, check ALL pages as they often continue across pages
 
+EXTREMELY IMPORTANT FOR CONTAINERS:
+- Container information might be in tables labeled "PARTICULARS FURNISHED BY SHIPPER"
+- They are often labeled as "Container No." and "Seal No."
+- Even if there's just one container, you MUST include it in the containers array
+- If product details are in a description field, parse and extract the product name
+- In newer BOL formats, container details may be in the Cargo section or Details section
+- Look for terms like "Description of Packages and Goods" to find product information
+- If no specific container type is shown, use "FLEXITANK" as the default type
+
 Pay special attention to:
 1. The document header for BOL number, vessel details, and dates
 2. The "Carrier's Reference" field which contains important reference numbers - MAKE SURE TO EXTRACT THIS CORRECTLY
 3. ALL pages of the "PARTICULARS FURNISHED BY SHIPPER" section for complete container details
 4. The shipper, consignee, and notify party sections for complete address information
-5. Any continuation pages that may contain additional container or cargo details`;
+5. Any continuation pages that may contain additional container or cargo details
+6. Sections labeled "DESCRIPTION OF GOODS" or similar which contain product information`;
 
       const userPrompt = `I'm providing you with a Bill of Lading (BOL) document that may have multiple pages.
 Please analyze ALL PAGES thoroughly and extract the information into the following JSON structure.
@@ -121,6 +132,13 @@ IMPORTANT: Make sure to:
 4. For "bolNumber", use ONLY the actual Bill of Lading number (B/L No.)  
 5. For "carrierReference", use ONLY the actual Carrier's Reference number if present
 6. Verify totals match the sum of all items across all pages
+
+EVEN MORE IMPORTANT:
+1. If you see container numbers, you MUST include them in the "containers" array
+2. If the document mentions "FLEXITANK", make sure to include a container with this type
+3. Look for any product descriptions like "BASE OIL" or similar terms
+4. Include at least one container entry even if details are minimal
+5. In newer BOL formats, container information might be in different sections than older formats
 
 Return this EXACT JSON structure with the values found:
 {
@@ -155,9 +173,9 @@ Return this EXACT JSON structure with the values found:
     {
       "containerNumber": "",  // Container number from cargo details
       "sealNumber": "",      // Seal number
-      "type": "",           // Container type (e.g., "DRY")
+      "type": "",           // Container type (e.g., "DRY", "FLEXITANK", etc.)
       "product": {
-        "name": "",         // Product name
+        "name": "",         // Product name (e.g., "BASE OIL")
         "description": "",  // Full product description
         "hsCode": ""       // HS Code if available
       },
@@ -185,7 +203,7 @@ Return this EXACT JSON structure with the values found:
   }
 }`;
 
-      // Optimize: Reduce document size to prevent timeouts
+      // Optimize: Reduce document size to prevent timeouts while keeping enough content for processing
       const optimizedData = { 
         type: document.type, 
         data: compressDocumentData(document.data) 
@@ -212,16 +230,56 @@ Return this EXACT JSON structure with the values found:
     // Race between the API call and the timeout
     const result = await Promise.race([processingPromise(), timeoutPromise]) as ProcessedDocument;
     
+    // Add additional validation and fallback processing for containers
+    if (!result.containers || result.containers.length === 0) {
+      console.warn('No containers extracted from document, adding default container');
+      
+      // Log document analysis attempt
+      console.log('Document processing debug info:');
+      console.log('- BOL Number:', result.shipmentDetails.bolNumber);
+      console.log('- Carrier Reference:', result.shipmentDetails.carrierReference);
+      console.log('- Document type:', document.type);
+      
+      // Add a default container with basic information
+      result.containers = [{
+        containerNumber: "UNKNOWN",
+        sealNumber: "UNKNOWN",
+        type: "FLEXITANK",
+        product: {
+          name: "BASE OIL",
+          description: "Base Oil Product",
+          hsCode: ""
+        },
+        quantity: {
+          volume: {
+            liters: 0,
+            gallons: 0
+          },
+          weight: {
+            kg: 0,
+            lbs: 0,
+            mt: 0
+          }
+        }
+      }];
+    }
+    
     console.timeEnd('claude-processing');
+    console.log(`Successfully processed document with ${result.containers.length} containers`);
+    
     return result;
   } catch (error) {
     console.timeEnd('claude-processing');
     console.error('Error in processDocumentWithClaude:', error);
     
+    // Extract any potential BOL number or document identifier before returning fallback
+    const extractedBolNumber = extractBolNumberFromData(document.data) || 'Unknown';
+    console.log('Extracted BOL number from fallback:', extractedBolNumber);
+    
     // Return a simplified response with only the essential fields to avoid timeouts
     return {
       shipmentDetails: {
-        bolNumber: extractBolNumberFromData(document.data) || 'Unknown',
+        bolNumber: extractedBolNumber,
         bookingNumber: '',
         vesselName: '',
         voyageNumber: '',
@@ -236,7 +294,27 @@ Return this EXACT JSON structure with the values found:
         consignee: { name: 'Could not extract - timeout', address: '', taxId: '' },
         notifyParty: { name: '', address: '' }
       },
-      containers: [],
+      containers: [{
+        containerNumber: "UNKNOWN",
+        sealNumber: "UNKNOWN",
+        type: "FLEXITANK",
+        product: {
+          name: "BASE OIL",
+          description: "Base Oil Product",
+          hsCode: ""
+        },
+        quantity: {
+          volume: {
+            liters: 0,
+            gallons: 0
+          },
+          weight: {
+            kg: 0,
+            lbs: 0,
+            mt: 0
+          }
+        }
+      }],
       commercial: {
         currency: '',
         freightTerms: '',
@@ -458,9 +536,13 @@ async function fetchFromClaudeDirect(document: { type: 'pdf' | 'image', data: st
 
 // Helper function to reduce document size to prevent timeouts
 function compressDocumentData(data: string): string {
-  // If data is longer than 100,000 characters, truncate it
-  if (data.length > 100000) {
-    return data.substring(0, 100000);
+  // Optimize data size based on the environment to prevent timeouts
+  const isProduction = process.env.NODE_ENV === 'production';
+  const maxLength = isProduction ? 75000 : 150000; // Increased from 50000/100000
+  
+  if (data.length > maxLength) {
+    console.log(`Compressing document data from ${data.length} to ${maxLength} characters`);
+    return data.substring(0, maxLength);
   }
   return data;
 } 

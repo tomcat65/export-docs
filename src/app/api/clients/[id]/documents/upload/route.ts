@@ -3,12 +3,82 @@ import { auth } from '@/lib/auth'
 import { connectDB } from '@/lib/db'
 import { Client } from '@/models/Client'
 import { Document } from '@/models/Document'
-import { processDocumentWithClaude } from '@/lib/claude'
+import { processBolWithFirebase } from '@/lib/firebase-client'
 import mongoose from 'mongoose'
 import { Readable } from 'stream'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+
+// Define interface for Firebase response
+interface FirebaseBolResponse {
+  success: boolean;
+  error?: string;
+  document: ProcessedDocument;
+  fallback?: boolean;
+}
+
+// Define interface for processed document from Firebase
+interface ProcessedDocument {
+  bolNumber: string;
+  shipmentDetails: {
+    bolNumber: string;
+    bookingNumber: string;
+    vesselName: string;
+    voyageNumber: string;
+    portOfLoading: string;
+    portOfDischarge: string;
+    dateOfIssue: string;
+    shipmentDate: string;
+    carrierReference?: string;
+  };
+  parties: {
+    shipper: {
+      name: string;
+      address: string;
+      taxId: string;
+    };
+    consignee: {
+      name: string;
+      address: string;
+      taxId: string;
+    };
+    notifyParty: {
+      name: string;
+      address: string;
+    };
+  };
+  containers: Array<{
+    containerNumber: string;
+    sealNumber: string;
+    type: string;
+    product: {
+      name: string;
+      description: string;
+      hsCode: string;
+    };
+    quantity: {
+      volume: {
+        liters: number;
+        gallons: number;
+      };
+      weight: {
+        kg: number;
+        lbs: number;
+        mt: number;
+      };
+    };
+  }>;
+  commercial: {
+    currency: string;
+    freightTerms: string;
+    itnNumber: string;
+    totalWeight?: {
+      kg: string;
+      lbs: string;
+    };
+  };
+}
 
 interface RouteParams {
   id: string
@@ -305,7 +375,7 @@ function cleanProductDescription(description: string): string {
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<RouteParams> }
+  { params }: { params: RouteParams }
 ) {
   let uploadStream: any
   let bucket: any
@@ -320,7 +390,7 @@ export async function POST(
     await connectDB()
 
     // Get client ID from params
-    const { id } = await params
+    const { id } = params
 
     // Find client
     const client = await Client.findById(id)
@@ -436,9 +506,15 @@ export async function POST(
             throw new Error('Document data is required for processing')
           }
           
-          let newProcessedData
+          let newProcessedData: FirebaseBolResponse;
           try {
-            newProcessedData = await processDocumentWithClaude(documentData)
+            // Convert the document data to the format expected by Firebase
+            newProcessedData = await processBolWithFirebase({
+              fileContent: documentData.data,
+              fileName: file.name,
+              fileType: documentData.type === 'pdf' ? 'application/pdf' : 'image/jpeg',
+              clientId: params.id
+            }) as FirebaseBolResponse;
             console.log('Successfully extracted data from replacement document')
           } catch (claudeError) {
             console.error('Error extracting data from replacement document:', claudeError)
@@ -475,7 +551,7 @@ export async function POST(
             })
           }
           
-          if (newProcessedData && existingDocument.bolData) {
+          if (newProcessedData && newProcessedData.success && existingDocument.bolData) {
             // Create a clean object for totalWeight that matches the expected schema format
             let totalWeight;
 
@@ -490,13 +566,15 @@ export async function POST(
                 lbs: existingDocument.bolData.totalWeight.lbs
               };
               console.log('Using existing totalWeight structure');
-            } else if (newProcessedData && newProcessedData.containers && newProcessedData.containers.length > 0) {
+            } else if (newProcessedData.document && 
+                       newProcessedData.document.containers && 
+                       newProcessedData.document.containers.length > 0) {
               // Calculate totalWeight from containers if needed
               totalWeight = {
-                kg: newProcessedData.containers.reduce((sum, container) => 
-                  sum + container.quantity.weight.kg, 0).toFixed(3),
-                lbs: newProcessedData.containers.reduce((sum, container) => 
-                  sum + container.quantity.weight.lbs, 0).toFixed(2)
+                kg: newProcessedData.document.containers.reduce((sum: number, container: any) => 
+                  sum + (container.quantity?.weight?.kg || 0), 0).toFixed(3),
+                lbs: newProcessedData.document.containers.reduce((sum: number, container: any) => 
+                  sum + (container.quantity?.weight?.lbs || 0), 0).toFixed(2)
               };
               console.log('Calculated new totalWeight from containers');
             } else {
@@ -531,7 +609,7 @@ export async function POST(
             
             // Log the carrier reference from the newly extracted data
             console.log('Extracted carrier reference from replacement document:', {
-              carrierReference: newProcessedData.shipmentDetails.carrierReference,
+              carrierReference: newProcessedData.document.shipmentDetails.carrierReference,
               existingCarrierReference: existingDocument.bolData.carrierReference
             })
             
@@ -539,10 +617,10 @@ export async function POST(
             const updatedBolData = {
               ...existingDocument.bolData,
               // Prioritize newly extracted data for these fields
-              carrierReference: newProcessedData.shipmentDetails.carrierReference || existingDocument.bolData.carrierReference,
-              bookingNumber: newProcessedData.shipmentDetails.bookingNumber || existingDocument.bolData.bookingNumber,
-              vessel: newProcessedData.shipmentDetails.vesselName || existingDocument.bolData.vessel,
-              voyage: newProcessedData.shipmentDetails.voyageNumber || existingDocument.bolData.voyage,
+              carrierReference: newProcessedData.document.shipmentDetails.carrierReference || existingDocument.bolData.carrierReference,
+              bookingNumber: newProcessedData.document.shipmentDetails.bookingNumber || existingDocument.bolData.bookingNumber,
+              vessel: newProcessedData.document.shipmentDetails.vesselName || existingDocument.bolData.vessel,
+              voyage: newProcessedData.document.shipmentDetails.voyageNumber || existingDocument.bolData.voyage,
               // Use the clean totalWeight object
               totalWeight: totalWeight
             }
@@ -579,7 +657,7 @@ export async function POST(
               // Just update the file ID and carrier reference directly
               try {
                 console.log('Attempting direct update with findByIdAndUpdate...');
-                console.log('Setting carrier reference to:', newProcessedData.shipmentDetails.carrierReference);
+                console.log('Setting carrier reference to:', newProcessedData.document.shipmentDetails.carrierReference);
                 
                 // Use a direct update to set just the carrier reference field
                 // This avoids schema validation issues
@@ -589,7 +667,7 @@ export async function POST(
                     $set: { 
                       fileId: uploadStream.id,
                       updatedAt: new Date(),
-                      'bolData.carrierReference': newProcessedData.shipmentDetails.carrierReference 
+                      'bolData.carrierReference': newProcessedData.document.shipmentDetails.carrierReference 
                     } 
                   },
                   { new: true }
@@ -627,30 +705,60 @@ export async function POST(
           throw new Error('Document data is required for processing')
         }
         
+        // Attempt to extract data
         console.log('Sending document to Claude for processing, file name:', file.name);
-        processedData = await processDocumentWithClaude(documentData)
         
-        // Log critical fields for debugging
-        console.log('Claude extraction results:');
-        console.log('  - BOL Number:', processedData.shipmentDetails.bolNumber || 'NOT FOUND');
-        console.log('  - Carrier Reference:', processedData.shipmentDetails.carrierReference || 'NOT FOUND');
-        console.log('  - Document Type:', file.name.includes('PL') ? 'Likely Packing List' : 'Likely BOL');
-        console.log('  - Shipper:', processedData.parties?.shipper?.name || 'NOT FOUND');
-        console.log('  - Consignee:', processedData.parties?.consignee?.name || 'NOT FOUND');
-        console.log('  - Container Count:', processedData.containers?.length || 0);
-      } catch (error) {
-        console.error('Error in processDocumentWithClaude:', error)
+        // Convert the document data to the format expected by Firebase
+        const result = await processBolWithFirebase({
+          fileContent: documentData.data,
+          fileName: file.name,
+          fileType: documentData.type === 'pdf' ? 'application/pdf' : 'image/jpeg',
+          clientId: params.id as string
+        }) as FirebaseBolResponse;
         
-        // If this is a replacement, we could bypass Claude processing and just upload the file
-        if (isReplacement) {
-          console.log('Bypassing Claude processing for replacement document')
-          return NextResponse.json(
-            { error: 'Failed to process replacement document. Please try again.' },
-            { status: 500 }
-          )
+        // Set processedData from the Firebase response
+        processedData = result.document;
+        
+        // Add validation for the extracted BOL number
+        const bolNumber = processedData.shipmentDetails?.bolNumber;
+        if (bolNumber) {
+          console.log(`Successfully extracted BOL number: ${bolNumber}`);
         } else {
-          throw error
+          console.warn('No BOL number was extracted from the document. This might cause issues with document verification.');
         }
+
+        // Also log critical fields for debugging with correct property paths
+        console.log(
+          `Critical data fields:
+          - BOL Number: ${processedData.shipmentDetails?.bolNumber || 'NOT FOUND'}
+          - Shipper: ${processedData.parties?.shipper?.name || 'NOT FOUND'}
+          - Container count: ${processedData.containers?.length || 0}
+          - File name: ${file.name}`
+        );
+      } catch (error) {
+        console.error('Error in processBolWithFirebase:', error);
+        
+        // Since no fallback is allowed, show a clear error message
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        
+        let userFriendlyMessage = 'Failed to process document with Claude AI.';
+        
+        if (errorMessage.includes('timeout')) {
+          userFriendlyMessage = 'The document processing timed out. The document may be too complex or large. Please try again or use a simpler document.';
+        } else if (errorMessage.includes('not-found')) {
+          userFriendlyMessage = 'The document processing service is currently unavailable. Please try again later.';
+        } else if (errorMessage.includes('No result returned')) {
+          userFriendlyMessage = 'Claude AI was unable to extract information from this document. Please ensure the document is a valid BOL and try again.';
+        }
+        
+        return NextResponse.json(
+          { 
+            error: userFriendlyMessage,
+            technicalError: errorMessage,
+            status: 'processing_failed'
+          },
+          { status: 500 }
+        );
       }
       
       if (!processedData || !processedData.shipmentDetails || !processedData.shipmentDetails.bolNumber) {
@@ -866,7 +974,27 @@ export async function POST(
         existingDocument.set(dbDocumentData);
         await existingDocument.save();
 
-    return NextResponse.json({
+        // Update all the custom fields with clean data
+        if (existingDocument.customFields) {
+          existingDocument.customFields = {
+            ...existingDocument.customFields,
+            totalContainers: processedData?.containers.length?.toString() || '0',
+            containers: processedData?.containers || [],
+            parties: processedData?.parties || {
+              shipper: { name: '', address: '', taxId: '' },
+              consignee: { name: '', address: '', taxId: '' },
+              notifyParty: { name: '', address: '' }
+            },
+            commercial: processedData?.commercial || {
+              currency: '',
+              freightTerms: '',
+              itnNumber: '',
+              totalWeight: { kg: '0', lbs: '0' }
+            }
+          };
+        }
+
+        return NextResponse.json({
           success: true,
           documentId: existingDocument._id.toString(),
           document: {

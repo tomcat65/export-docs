@@ -1,0 +1,64 @@
+{
+  "bolNumber": "HLCUSHA2307ADRIA",
+  "fileName": "MCOP0101_650126304.pdf",
+  "clientId": "12345",
+  "shipmentDetails": {
+    "bolNumber": "HLCUSHA2307ADRIA",
+    "bookingNumber": "8018325",
+    "carrierReference": "",
+    "vesselName": "EVER URANUS",
+    "voyageNumber": "0319-086E",
+    "portOfLoading": "SHANGHAI, CHINA",
+    "portOfDischarge": "HOUSTON, TX",
+    "dateOfIssue": "18 JUL 2023",
+    "shipmentDate": "18 JUL 2023"
+  },
+  "parties": {
+    "shipper": {
+      "name": "ADRIA CORPORATION",
+      "address": "ROOM 1906, NO. 1 BUILDING, NO. 399 HENGFENG ROAD, JING'AN DISTRICT, SHANGHAI, CHINA",
+      "taxId": ""
+    },
+    "consignee": {
+      "name": "ADRIA CORPORATION",
+      "address": "1300 E EXPRESSWAY 83 SUITE 105 MCALLEN TX 78503 USA",
+      "taxId": ""
+    },
+    "notifyParty": {
+      "name": "SAME AS CONSIGNEE",
+      "address": ""
+    }
+  },
+  "containers": [
+    {
+      "containerNumber": "HLXU8034992",
+      "sealNumber": "ML-CN1234567",
+      "type": "40'HC",
+      "product": {
+        "name": "HOUSEHOLD GOODS",
+        "description": "HOUSEHOLD GOODS",
+        "hsCode": ""
+      },
+      "quantity": {
+        "volume": {
+          "liters": 0,
+          "gallons": 0
+        },
+        "weight": {
+          "kg": 5000,
+          "lbs": 11023,
+          "mt": 5
+        }
+      }
+    }
+  ],
+  "commercial": {
+    "currency": "",
+    "freightTerms": "FREIGHT PREPAID",
+    "itnNumber": "",
+    "totalWeight": {
+      "kg": "5000",
+      "lbs": "11023"
+    }
+  }
+}

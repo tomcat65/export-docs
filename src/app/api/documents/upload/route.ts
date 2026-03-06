@@ -5,7 +5,7 @@ import { Document, VALID_DOCUMENT_TYPES, IDocument } from '@/models/Document'
 import { Client } from '@/models/Client'
 import mongoose from 'mongoose'
 import { GridFSBucket } from 'mongodb'
-import { processDocumentWithClaude } from '@/lib/claude'
+import { processBolWithFirebase, processBolDocument } from '@/lib/firebase-client'
 
 // Add type definition for Client
 interface ClientDocument {
@@ -58,6 +58,45 @@ interface ProcessedDocument {
       lbs: string;
     };
   };
+}
+
+// Add type definition for Firebase function response
+interface FirebaseBolResponse {
+  success: boolean;
+  document?: {
+    bolNumber: string;
+    fileName: string;
+    clientId: string;
+    shipmentDetails: ShipmentDetails;
+    parties: {
+      shipper: {
+        name: string;
+        address: string;
+        taxId: string;
+      };
+      consignee: {
+        name: string;
+        address: string;
+        taxId: string;
+      };
+      notifyParty: {
+        name: string;
+        address: string;
+      };
+    };
+    containers: Array<any>;
+    commercial: {
+      currency: string;
+      freightTerms: string;
+      itnNumber: string;
+      totalWeight?: {
+        kg: string;
+        lbs: string;
+      };
+    };
+  };
+  error?: string;
+  storageError?: string;
 }
 
 // Helper function to normalize text for comparison
@@ -207,6 +246,28 @@ async function verifyClientMatch(consignee: { name: string; taxId?: string }, cl
     console.error('Error in client verification:', error);
     return { isMatch: false };
   }
+}
+
+// Helper function to extract BOL number from filename
+function extractBolNumberFromFilename(filename: string): string | null {
+  // Try to find common BOL number patterns in the filename
+  const patterns = [
+    /(\d{9})/, // Basic 9-digit pattern
+    /MDRA\d+_(\d{9})/, // MDRA pattern
+    /BOL[_]?(\d{9})/, // BOL prefix pattern with underscore
+    /BOL[-]?(\d{9})/, // BOL prefix pattern with hyphen
+    /[_](\d{9})[_\.]/, // Surrounded by underscore or dot
+    /[-](\d{9})[-\.]/ // Surrounded by hyphen or dot
+  ];
+  
+  for (const pattern of patterns) {
+    const match = filename.match(pattern);
+    if (match && match[1]) {
+      return match[1];
+    }
+  }
+  
+  return null;
 }
 
 export async function POST(request: NextRequest) {
@@ -370,229 +431,305 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    // If we reach here, this is a BOL upload, continue with the existing BOL processing
-    // Get the selected client's details
-    const selectedClient = await Client.findById(clientId).lean() as unknown as ClientDocument
-    if (!selectedClient) {
-      return NextResponse.json({ error: 'Selected client not found' }, { status: 400 })
-    }
-
-    // Log the selected client details
-    console.log('Selected client:', {
-      id: selectedClient._id,
-      name: selectedClient.name,
-      rif: selectedClient.rif
-    });
-
-    // Convert File to Buffer for Claude processing
-    const arrayBuffer = await file.arrayBuffer()
-    const buffer = Buffer.from(arrayBuffer)
-
-    // Always process with Claude first to verify the client
-    console.log('Processing BOL with Claude for client verification:', bolNumber);
-    
-    // Declare claudeData outside the try block
-    let claudeData: ProcessedDocument;
+    // If we reach here, this is a BOL upload
+    // We'll use a different approach that leverages Firebase for processing
     
     try {
-      // Process the document with Claude
-      const result = await processDocumentWithClaude({
-        type: file.type.includes('pdf') ? 'pdf' : 'image',
-        data: buffer.toString('base64')
+      console.log('Uploading BOL document and sending to Firebase for processing:', {
+        fileName: file.name,
+        clientId,
+        fileSize: `${Math.round(file.size / 1024)}KB`
       });
       
-      // Store the result in our variable
-      claudeData = result as ProcessedDocument;
+      // Convert File to Buffer
+      const arrayBuffer = await file.arrayBuffer()
+      const buffer = Buffer.from(arrayBuffer)
       
-      // SECURITY CHECK: Log the entire Claude response for debugging critical issues
-      console.log('---------- CLAUDE FULL RESPONSE ----------');
-      console.log(JSON.stringify(claudeData, null, 2));
-      console.log('------------------------------------------');
-    } catch (claudeError) {
-      console.error('Error during Claude processing:', claudeError);
-      return NextResponse.json({
-        error: 'Failed to process document with AI. The document may be too complex or our AI service may be experiencing issues.',
-        details: claudeError instanceof Error ? claudeError.message : 'Unknown error'
-      }, { status: 500 });
-    }
-
-    // Fix any naming inconsistencies with carrier reference
-    // @ts-ignore - Check for misnamed field
-    if (claudeData.shipmentDetails.carriersReference !== undefined && claudeData.shipmentDetails.carrierReference === undefined) {
-      // @ts-ignore - Access misnamed field
-      claudeData.shipmentDetails.carrierReference = claudeData.shipmentDetails.carriersReference;
-      // @ts-ignore - Delete misnamed field
-      delete claudeData.shipmentDetails.carriersReference;
-      console.log('Fixed carrier reference field name in upload route');
-    }
-
-    // Log Claude's response for debugging
-    console.log('Claude extracted data:', {
-      bolNumber: claudeData.shipmentDetails.bolNumber,
-      carrierReference: claudeData.shipmentDetails.carrierReference, // Fixed the field name
-      consignee: claudeData.parties.consignee,
-      shipper: claudeData.parties.shipper
-    });
-
-    // SECURITY CHECK: Validate the data structure is complete
-    if (!claudeData || !claudeData.parties) {
-      console.error('Claude response is missing critical fields:', claudeData);
-      return NextResponse.json(
-        { error: 'Failed to process document - missing data structure' },
-        { status: 400 }
-      );
-    }
-
-    // Validate Claude's response
-    if (!claudeData.parties?.consignee) {
-      console.error('Claude failed to extract consignee data');
-      return NextResponse.json(
-        { error: 'Failed to extract consignee information from the document' },
-        { status: 400 }
-      );
-    }
-
-    // SECURITY CHECK: Ensure consignee name is not suspiciously short
-    if (!claudeData.parties.consignee.name || claudeData.parties.consignee.name.length < 3) {
-      console.error('Consignee name is missing or suspiciously short:', claudeData.parties.consignee.name);
-      return NextResponse.json(
-        { error: 'The consignee name could not be properly extracted from the document' },
-        { status: 400 }
-      );
-    }
-
-    // SECURITY CHECK: Verify both shipper and consignee are present
-    if (!claudeData.parties.shipper || !claudeData.parties.shipper.name) {
-      console.error('Shipper information is missing, which is suspicious');
-      return NextResponse.json(
-        { error: 'Complete shipping information could not be extracted. Please check the document.' },
-        { status: 400 }
-      );
-    }
-
-    // Verify the consignee matches the selected client
-    const consignee = claudeData.parties.consignee
-    const verificationResult = await verifyClientMatch(consignee, clientId);
-    
-    if (!verificationResult.isMatch) {
-      const errorMessage = verificationResult.matchedClient 
-        ? `This BOL appears to belong to ${verificationResult.matchedClient.name}. Please check the selected client and try again.`
-        : 'This BOL belongs to a different client. Please check the selected client and try again.';
-        
-      return NextResponse.json(
-        { 
-          error: errorMessage,
-          details: {
-            detectedClient: consignee.name,
-            selectedClient: selectedClient.name,
-            detectedTaxId: consignee.taxId || 'Not found',
-            selectedTaxId: selectedClient.rif || 'Not found',
-            potentialMatches: verificationResult.allClients
-          }
-        },
-        { status: 400 }
-      )
-    }
-
-    // Check if we already have a document with this BOL number
-    const existingDoc = await Document.findOne({ 
-      'bolData.bolNumber': claudeData.shipmentDetails.bolNumber,
-      type: 'BOL'
-    })
-
-    // If we have an existing document, update it
-    if (existingDoc) {
-      console.log('Updating existing document for BOL:', claudeData.shipmentDetails.bolNumber)
-      existingDoc.updatedAt = new Date()
+      // First, extract a BOL number from the filename if possible
+      // This will be used for initial storage before processing
+      const extractedBolNumber = extractBolNumberFromFilename(file.name) || bolNumber || 'unidentified';
       
-      // Create a bolData object that conforms to the schema
-      existingDoc.bolData = {
-        bolNumber: claudeData.shipmentDetails.bolNumber,
-        bookingNumber: claudeData.shipmentDetails.bookingNumber,
-        shipper: claudeData.shipmentDetails.shipper || '',
-        carrierReference: claudeData.shipmentDetails.carrierReference,
-        vessel: claudeData.shipmentDetails.vesselName,
-        voyage: claudeData.shipmentDetails.voyageNumber,
-        portOfLoading: claudeData.shipmentDetails.portOfLoading,
-        portOfDischarge: claudeData.shipmentDetails.portOfDischarge,
-        dateOfIssue: claudeData.shipmentDetails.dateOfIssue,
-        totalContainers: claudeData.containers?.length?.toString() || '0',
-        totalWeight: {
-          kg: claudeData.commercial?.totalWeight?.kg || '0',
-          lbs: claudeData.commercial?.totalWeight?.lbs || '0'
+      // Upload file to GridFS first to store the original document
+      const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db!, {
+        bucketName: 'documents'
+      });
+      
+      const uploadStream = bucket.openUploadStream(file.name, {
+        contentType: file.type,
+        metadata: {
+          clientId: clientId,
+          bolNumber: extractedBolNumber,
+          uploadedBy: session.user?.email,
+          uploadedAt: new Date().toISOString(),
+          fileName: file.name,
+          documentType: 'BOL',
+          status: 'processing' // Mark as processing until Firebase completes
         }
-      }
+      });
       
-      // Store additional extracted data in custom fields if needed
-      existingDoc.set('extractedData', {
-        status: 'processed',
-        containers: claudeData.containers,
-        parties: claudeData.parties,
-        commercial: claudeData.commercial
-      })
+      await new Promise((resolve, reject) => {
+        const readStream = require('stream').Readable.from(buffer)
+        readStream.pipe(uploadStream)
+          .on('error', reject)
+          .on('finish', resolve)
+      });
       
-      await existingDoc.save()
+      console.log('Document uploaded to GridFS, creating initial document record');
       
-      return NextResponse.json({
-        success: true,
-        document: {
-          _id: existingDoc._id,
-          fileName: existingDoc.fileName,
-          type: existingDoc.type
-        }
-      })
-    }
-
-    // Upload file to GridFS for new documents
-    const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db!, {
-      bucketName: 'documents'
-    })
-
-    const uploadStream = bucket.openUploadStream(file.name, {
-      contentType: file.type,
-      metadata: {
+      // Create initial document record in MongoDB
+      const initialDocument = await Document.create({
         clientId: clientId,
-        bolNumber,
-        uploadedBy: session.user?.email,
-        uploadedAt: new Date().toISOString(),
         fileName: file.name,
-        relatedBolId: relatedBolId
+        fileId: uploadStream.id,
+        type: 'BOL',
+        status: 'processing',
+        bolData: {
+          bolNumber: extractedBolNumber,
+          status: 'processing'
+        },
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+      
+      console.log('Initial document record created, sending to Firebase for processing');
+      
+      // Now send the document to Firebase for processing
+      try {
+        const result = await processBolWithFirebase({
+          fileContent: buffer.toString('base64'),
+          fileName: file.name,
+          fileType: file.type,
+          clientId: clientId
+        }) as FirebaseBolResponse;
+        
+        console.log('Firebase function returned result:', {
+          success: result.success,
+          hasDocument: !!result.document,
+          error: result.error || 'none'
+        });
+        
+        // If Firebase processing succeeded, update the document record
+        if (result.success && result.document) {
+          const { bolNumber, shipmentDetails, parties, containers, commercial } = result.document;
+          
+          // Check if we already have a document with this BOL number before updating
+          const existingDoc = await Document.findOne({ 
+            'bolData.bolNumber': bolNumber,
+            type: 'BOL'
+          });
+          
+          // If we have an existing document, update it rather than creating a new one
+          if (existingDoc) {
+            console.log('Found existing document with same BOL number:', bolNumber);
+            
+            // Update the existing document with the new data from Firebase
+            existingDoc.updatedAt = new Date();
+            existingDoc.set('status', 'processed');
+            
+            // Create a bolData object that conforms to the schema
+            existingDoc.bolData = {
+              bolNumber: bolNumber,
+              bookingNumber: shipmentDetails?.bookingNumber || '',
+              shipper: shipmentDetails?.shipper || parties?.shipper?.name || '',
+              carrierReference: shipmentDetails?.carrierReference || '',
+              vessel: shipmentDetails?.vesselName || '',
+              voyage: shipmentDetails?.voyageNumber || '',
+              portOfLoading: shipmentDetails?.portOfLoading || '',
+              portOfDischarge: shipmentDetails?.portOfDischarge || '',
+              dateOfIssue: shipmentDetails?.dateOfIssue || new Date().toISOString().split('T')[0],
+              totalContainers: containers?.length?.toString() || '0',
+              totalWeight: commercial?.totalWeight || { kg: '0', lbs: '0' }
+            };
+            
+            // Store additional extracted data in custom fields
+            existingDoc.set('extractedData', {
+              containers: containers || [],
+              parties: parties || {},
+              commercial: commercial || {}
+            });
+            
+            await existingDoc.save();
+            
+            // Keep the initial document or we might lose documents in the UI
+            // Instead of deleting, mark it as a duplicate
+            await Document.findByIdAndUpdate(initialDocument._id, {
+              status: 'duplicate',
+              duplicateOf: existingDoc._id
+            });
+            
+            // Return the existing document data for UI display
+            return NextResponse.json({
+              success: true,
+              document: {
+                _id: existingDoc._id,
+                fileName: existingDoc.fileName,
+                type: existingDoc.type,
+                bolNumber,
+                // Include these extra fields to help the UI display the document
+                status: 'processed',
+                clientId: clientId,
+                bolData: existingDoc.bolData,
+                // Include all extracted data to ensure UI has complete information
+                extractedData: {
+                  containers: containers || [],
+                  parties: parties || {},
+                  commercial: commercial || {}
+                }
+              }
+            });
+          }
+          
+          // Verify the consignee matches the selected client
+          let verificationPassed = true;
+          if (parties && parties.consignee) {
+            const verificationResult = await verifyClientMatch(parties.consignee, clientId);
+            
+            if (!verificationResult.isMatch) {
+              console.error('Client verification failed:', {
+                detected: parties.consignee.name,
+                selected: clientId,
+                bolNumber
+              });
+              
+              verificationPassed = false;
+              
+              // Update document status but don't fail the request
+              await Document.findByIdAndUpdate(initialDocument._id, {
+                status: 'verification_failed',
+                verificationError: `Document appears to belong to ${parties.consignee.name}, not ${verificationResult.matchedClient?.name || 'the selected client'}`
+              });
+              
+              return NextResponse.json({
+                success: false,
+                error: `This BOL appears to belong to ${parties.consignee.name}. Please check the selected client and try again.`,
+                document: {
+                  _id: initialDocument._id,
+                  fileName: initialDocument.fileName,
+                  type: initialDocument.type,
+                  status: 'verification_failed'
+                }
+              }, { status: 400 });
+            }
+          }
+          
+          // If verification passed, update document with the extracted data
+          await Document.findByIdAndUpdate(initialDocument._id, {
+            status: 'processed',
+            bolData: {
+              bolNumber: bolNumber,
+              bookingNumber: shipmentDetails?.bookingNumber || '',
+              shipper: shipmentDetails?.shipper || parties?.shipper?.name || '',
+              carrierReference: shipmentDetails?.carrierReference || '',
+              vessel: shipmentDetails?.vesselName || '',
+              voyage: shipmentDetails?.voyageNumber || '',
+              portOfLoading: shipmentDetails?.portOfLoading || '',
+              portOfDischarge: shipmentDetails?.portOfDischarge || '',
+              dateOfIssue: shipmentDetails?.dateOfIssue || new Date().toISOString().split('T')[0],
+              totalContainers: containers?.length?.toString() || '0',
+              totalWeight: commercial?.totalWeight || { kg: '0', lbs: '0' }
+            },
+            extractedData: {
+              containers: containers || [],
+              parties: parties || {},
+              commercial: commercial || {}
+            }
+          });
+          
+          // Return the new document data for UI display
+          return NextResponse.json({
+            success: true,
+            document: {
+              _id: initialDocument._id,
+              fileName: initialDocument.fileName,
+              type: initialDocument.type,
+              bolNumber,
+              // Include these extra fields for consistency
+              status: 'processed',
+              clientId: clientId,
+              bolData: {
+                bolNumber: bolNumber,
+                bookingNumber: shipmentDetails?.bookingNumber || '',
+                shipper: shipmentDetails?.shipper || parties?.shipper?.name || '',
+                carrierReference: shipmentDetails?.carrierReference || '',
+                vessel: shipmentDetails?.vesselName || '',
+                voyage: shipmentDetails?.voyageNumber || '',
+                portOfLoading: shipmentDetails?.portOfLoading || '',
+                portOfDischarge: shipmentDetails?.portOfDischarge || '',
+                dateOfIssue: shipmentDetails?.dateOfIssue || new Date().toISOString().split('T')[0],
+                totalContainers: containers?.length?.toString() || '0',
+                totalWeight: commercial?.totalWeight || { kg: '0', lbs: '0' }
+              },
+              // Include all extracted data to ensure UI has complete information
+              extractedData: {
+                containers: containers || [],
+                parties: parties || {},
+                commercial: commercial || {}
+              }
+            }
+          });
+        } else if (result.error) {
+          // Firebase function returned an error
+          console.error('Firebase processing error:', result.error);
+          
+          await Document.findByIdAndUpdate(initialDocument._id, {
+            status: 'error',
+            processingError: result.error
+          });
+          
+          return NextResponse.json({
+            success: false,
+            error: `Document processing failed: ${result.error}`,
+            document: {
+              _id: initialDocument._id,
+              fileName: initialDocument.fileName,
+              type: initialDocument.type,
+              status: 'error'
+            }
+          }, { status: 500 });
+        } else {
+          // No result or error from Firebase
+          console.error('Firebase processing returned no result or error');
+          
+          await Document.findByIdAndUpdate(initialDocument._id, {
+            status: 'error',
+            processingError: 'No result or error returned from processing'
+          });
+          
+          return NextResponse.json({
+            success: false,
+            error: 'Document processing failed: No result returned',
+            document: {
+              _id: initialDocument._id,
+              fileName: initialDocument.fileName,
+              type: initialDocument.type,
+              status: 'error'
+            }
+          }, { status: 500 });
+        }
+      } catch (firebaseError) {
+        // Error calling the Firebase function
+        console.error('Error calling Firebase function:', firebaseError);
+        
+        await Document.findByIdAndUpdate(initialDocument._id, {
+          status: 'error',
+          processingError: firebaseError instanceof Error ? firebaseError.message : 'Unknown firebase error'
+        });
+        
+        return NextResponse.json({
+          success: false,
+          error: `Error calling document processing service: ${firebaseError instanceof Error ? firebaseError.message : 'Unknown error'}`,
+          document: {
+            _id: initialDocument._id,
+            fileName: initialDocument.fileName,
+            type: initialDocument.type,
+            status: 'error'
+          }
+        }, { status: 500 });
       }
-    })
-
-    await new Promise((resolve, reject) => {
-      const readStream = require('stream').Readable.from(buffer)
-      readStream.pipe(uploadStream)
-        .on('error', reject)
-        .on('finish', resolve)
-    })
-
-    // Create new document record with Claude's extracted data
-    const newDocument = await Document.create({
-      clientId: clientId,
-      fileName: file.name,
-      fileId: uploadStream.id,
-      type: 'BOL',
-      bolData: {
-        ...claudeData.shipmentDetails,
-        status: 'processed',
-        containers: claudeData.containers,
-        parties: claudeData.parties,
-        commercial: claudeData.commercial
-      },
-      createdAt: new Date(),
-      updatedAt: new Date()
-    })
-
-    return NextResponse.json({
-      success: true,
-      document: {
-        _id: newDocument._id,
-        fileName: newDocument.fileName,
-        type: newDocument.type
-      }
-    })
-
+    } catch (error) {
+      console.error('Error in BOL upload process:', error);
+      throw error;
+    }
   } catch (error) {
     console.error('Error processing upload:', error)
     

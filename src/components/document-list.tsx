@@ -104,6 +104,13 @@ interface DocumentListProps {
 }
 
 export function DocumentList({ clientId, documents, onDocumentDeleted }: DocumentListProps) {
+  // Add debugging to check received documents
+  console.log('DocumentList received documents:', {
+    count: documents.length,
+    types: documents.map(d => d.type),
+    ids: documents.map(d => d._id)
+  });
+
   const { toast } = useToast()
   const router = useRouter()
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null)
@@ -145,6 +152,9 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
     // Group documents by BOL number
     const grouped: Record<string, Document[]> = {}
     
+    // Debug the document grouping process
+    console.log('Grouping documents, filtered count:', filteredDocuments.length);
+    
     // First, add all BOL documents
     filteredDocuments.forEach(doc => {
       if (doc.type === 'BOL' && doc.bolData?.bolNumber) {
@@ -156,19 +166,59 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
       }
     })
     
-    // Then add related documents
+    // Then add related documents and gather unmatched ones too
+    let unmatchedDocs: Document[] = [];
     filteredDocuments.forEach(doc => {
-      if (doc.type !== 'BOL' && doc.relatedBolId) {
-        // Find the BOL document
-        const bolDoc = filteredDocuments.find(d => d._id === doc.relatedBolId)
-        if (bolDoc?.bolData?.bolNumber) {
-          const bolNumber = bolDoc.bolData.bolNumber
-          if (grouped[bolNumber]) {
-            grouped[bolNumber].push(doc)
+      if (doc.type !== 'BOL') {
+        let matched = false;
+        
+        // Check if doc has a relatedBolId match
+        if (doc.relatedBolId) {
+          // Find the BOL document
+          const bolDoc = filteredDocuments.find(d => d._id === doc.relatedBolId);
+          if (bolDoc?.bolData?.bolNumber) {
+            const bolNumber = bolDoc.bolData.bolNumber;
+            if (grouped[bolNumber]) {
+              grouped[bolNumber].push(doc);
+              matched = true;
+            }
           }
         }
+        
+        // If not matched by relatedBolId, try BOL number in filename
+        if (!matched) {
+          const match = doc.fileName.match(/(\d{9})/);
+          if (match) {
+            const extractedNumber = match[1];
+            // Check if this number matches any known BOL number
+            if (grouped[extractedNumber]) {
+              grouped[extractedNumber].push(doc);
+              matched = true;
+            }
+          }
+        }
+        
+        // If still not matched, add to unmatched list
+        if (!matched) {
+          unmatchedDocs.push(doc);
+        }
       }
-    })
+    });
+
+    // Add unmatched docs to a special category
+    if (unmatchedDocs.length > 0) {
+      grouped['_unmatched'] = unmatchedDocs;
+      console.log(`Added ${unmatchedDocs.length} unmatched documents to special group`);
+    }
+    
+    // Debug the grouped documents before sorting
+    console.log('Documents after initial grouping:', {
+      groups: Object.keys(grouped),
+      totalGroups: Object.keys(grouped).length,
+      countsPerGroup: Object.fromEntries(
+        Object.entries(grouped).map(([key, docs]) => [key, docs.length])
+      )
+    });
 
     // Get the BOL documents for sorting - completely rewritten date handling
     const sortableEntries = Object.entries(grouped).map(([bolNumber, docs]) => {
@@ -244,49 +294,57 @@ export function DocumentList({ clientId, documents, onDocumentDeleted }: Documen
       sortedGrouped[entry.bolNumber] = entry.docs
     });
     
+    // Debug the final sorted grouping
+    console.log('Final sorted documents:', {
+      groups: Object.keys(sortedGrouped),
+      totalGroups: Object.keys(sortedGrouped).length,
+    });
+    
     setGroupedDocuments(sortedGrouped)
     
-    // Initialize expanded states
-    let initialExpandState: Record<string, boolean> = {}
-    let initialShipmentDetailsState: Record<string, boolean> = {}
+    // Initialize expanded states for new BOL numbers only
+    const newBolNumbers = Object.keys(sortedGrouped).filter(
+      bolNumber => !Object.keys(expandedCards).includes(bolNumber)
+    );
     
-    // Check if we should preserve the state from a refresh
-    const shouldPreserveState = sessionStorage.getItem('preserveDocumentListState') === 'true'
-    
-    if (shouldPreserveState) {
-      // Try to get saved states from sessionStorage
-      try {
-        const savedExpandedCards = sessionStorage.getItem('expandedCards')
-        const savedExpandedShipmentDetails = sessionStorage.getItem('expandedShipmentDetails')
-        
-        if (savedExpandedCards) {
-          initialExpandState = JSON.parse(savedExpandedCards)
-        }
-        
-        if (savedExpandedShipmentDetails) {
-          initialShipmentDetailsState = JSON.parse(savedExpandedShipmentDetails)
-        }
-        
-        // Clear the flag
-        sessionStorage.removeItem('preserveDocumentListState')
-      } catch (error) {
-        console.error('Error restoring document list state:', error)
-      }
+    if (newBolNumbers.length > 0) {
+      // Only update for new BOL numbers to avoid triggering a re-render loop
+      setExpandedCards(prev => {
+        const updates: Record<string, boolean> = {};
+        newBolNumbers.forEach(bolNumber => {
+          updates[bolNumber] = false;
+        });
+        return { ...prev, ...updates };
+      });
+      
+      setExpandedShipmentDetails(prev => {
+        const updates: Record<string, boolean> = {};
+        newBolNumbers.forEach(bolNumber => {
+          updates[bolNumber] = false;
+        });
+        return { ...prev, ...updates };
+      });
     }
-    
-    // For any BOL numbers not in the saved state, initialize as collapsed
-    Object.keys(grouped).forEach(bolNumber => {
-      if (initialExpandState[bolNumber] === undefined) {
-        initialExpandState[bolNumber] = false
+  }, [filteredDocuments, sortOrder]) // Remove expandedCards and expandedShipmentDetails from dependency array
+
+  // Initialize expanded states from sessionStorage on component mount
+  useEffect(() => {
+    try {
+      // Attempt to load saved expansion states once on mount
+      const savedExpandedCards = sessionStorage.getItem('expandedCards');
+      const savedExpandedShipmentDetails = sessionStorage.getItem('expandedShipmentDetails');
+      
+      if (savedExpandedCards) {
+        setExpandedCards(JSON.parse(savedExpandedCards));
       }
-      if (initialShipmentDetailsState[bolNumber] === undefined) {
-        initialShipmentDetailsState[bolNumber] = false
+      
+      if (savedExpandedShipmentDetails) {
+        setExpandedShipmentDetails(JSON.parse(savedExpandedShipmentDetails));
       }
-    })
-    
-    setExpandedCards(initialExpandState)
-    setExpandedShipmentDetails(initialShipmentDetailsState)
-  }, [filteredDocuments, sortOrder])
+    } catch (error) {
+      console.error('Error loading document list state:', error);
+    }
+  }, []); // Empty dependency array means this runs once on mount
 
   // Save state to sessionStorage when it changes
   useEffect(() => {

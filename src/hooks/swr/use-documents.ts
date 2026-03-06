@@ -3,6 +3,7 @@
 import useSWR, { KeyedMutator } from 'swr';
 import { createCacheKey, createSwrConfig } from './swr-config';
 import { Document } from '@/models/Document';
+import { useEffect } from 'react';
 
 const DOCUMENTS_NAMESPACE = 'documents';
 
@@ -50,7 +51,12 @@ export function useDocument(documentId: string | null) {
  * @returns Documents array, loading state, error, and mutate function
  */
 export function useClientDocuments(clientId: string | null) {
-  const config = createSwrConfig();
+  const config = createSwrConfig({
+    revalidateOnFocus: true,
+    revalidateIfStale: true,
+    dedupingInterval: 2000, // Lower to 2 seconds to reduce stale data risk
+    refreshInterval: 30000, // Refresh every 30 seconds
+  });
 
   const cacheKey = clientId 
     ? createCacheKey(DOCUMENTS_NAMESPACE, `client:${clientId}:documents`) 
@@ -63,15 +69,49 @@ export function useClientDocuments(clientId: string | null) {
       
       // Add a timestamp to prevent browser caching
       const timestamp = new Date().getTime();
-      const response = await fetch(`/api/clients/${clientId}/documents?t=${timestamp}`);
+      const response = await fetch(`/api/clients/${clientId}/documents?t=${timestamp}`, {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      });
+      
       if (!response.ok) {
-        throw new Error('Failed to fetch client documents');
+        const errorText = await response.text();
+        console.error(`Failed to fetch client documents: ${response.status} - ${errorText}`);
+        throw new Error(`Failed to fetch client documents: ${response.status}`);
       }
       
-      return response.json();
+      const result = await response.json();
+      console.log(`SWR fetch returned ${result.documents?.length || 0} documents`);
+      
+      // Validate documents array
+      if (!result.documents || !Array.isArray(result.documents)) {
+        console.error('API returned invalid documents format:', result);
+        throw new Error('API returned invalid documents data');
+      }
+      
+      return result;
     },
     config
   );
+
+  // Log document data for debugging
+  console.log('SWR documents data:', {
+    hasData: !!data,
+    count: data?.documents?.length || 0,
+    loading: isLoading,
+    error: error?.message
+  });
+
+  // Force revalidation if there's an error or no data
+  useEffect(() => {
+    if ((error || (data && data.documents && data.documents.length === 0)) && clientId) {
+      console.log('Triggering revalidation due to error or empty documents');
+      mutate();
+    }
+  }, [error, data, clientId, mutate]);
 
   return {
     documents: data?.documents || [],

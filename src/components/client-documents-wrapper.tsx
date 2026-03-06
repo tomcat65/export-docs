@@ -64,8 +64,18 @@ export function ClientDocumentsWrapper({
     }
   }, [client.id, mutate])
 
+  // Trigger immediate reload of documents
+  useEffect(() => {
+    // Reload documents immediately on component mount
+    if (client.id) {
+      console.log('Triggering immediate document reload for client:', client.id);
+      mutate();
+    }
+  }, [client.id, mutate]);
+
   // Refresh documents by triggering a mutation
   const refreshDocuments = async () => {
+    console.log('Manually refreshing documents for client:', client.id);
     mutate()
     
     // Also notify other tabs/windows of the change
@@ -93,8 +103,41 @@ export function ClientDocumentsWrapper({
   // Display any errors
   const displayError = error || mutationError
   
-  // Use the initial documents if SWR hasn't loaded yet, otherwise use the SWR data
-  const displayDocuments = isLoading ? initialClient.documents : (documents.length > 0 ? documents : initialClient.documents)
+  // Enhanced document handling logic
+  const getDocumentsToDisplay = () => {
+    // If we have documents from SWR and they're not empty, use those
+    if (documents && Array.isArray(documents) && documents.length > 0) {
+      console.log('Using SWR documents:', documents.length);
+      return documents;
+    }
+    
+    // If SWR is still loading, use initial documents
+    if (isLoading && initialClient.documents && Array.isArray(initialClient.documents) && initialClient.documents.length > 0) {
+      console.log('Using initial documents while loading:', initialClient.documents.length);
+      return initialClient.documents;
+    }
+    
+    // If neither has documents, but we have initial documents, use those
+    if (initialClient.documents && Array.isArray(initialClient.documents) && initialClient.documents.length > 0) {
+      console.log('Falling back to initial documents:', initialClient.documents.length);
+      return initialClient.documents;
+    }
+    
+    // Last resort - return empty array
+    console.log('No documents available to display');
+    return [];
+  };
+  
+  const displayDocuments = getDocumentsToDisplay();
+
+  // Enhanced logging for debugging
+  console.log('Document sources:', {
+    initialCount: initialClient.documents?.length || 0,
+    swrCount: documents?.length || 0,
+    displayCount: displayDocuments.length,
+    isLoading,
+    hasError: !!displayError
+  });
   
   return (
     <div className='space-y-6'>
@@ -112,6 +155,15 @@ export function ClientDocumentsWrapper({
             </div>
           </div>
         </div>
+        
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={refreshDocuments}
+          disabled={isLoading || isMutating}
+        >
+          Refresh Documents
+        </Button>
       </div>
 
       {displayError && (
@@ -120,11 +172,20 @@ export function ClientDocumentsWrapper({
         </div>
       )}
 
-      <DocumentList 
-        clientId={client.id} 
-        documents={displayDocuments as any[]}
-        onDocumentDeleted={refreshDocuments}
-      />
+      {displayDocuments.length === 0 && !isLoading && (
+        <div className="p-6 text-center border rounded-lg">
+          <p className="text-lg text-gray-600">No documents found for this client.</p>
+          <p className="text-sm text-gray-500 mt-1">Try refreshing or uploading new documents.</p>
+        </div>
+      )}
+
+      {displayDocuments.length > 0 && (
+        <DocumentList 
+          clientId={client.id} 
+          documents={displayDocuments}
+          onDocumentDeleted={refreshDocuments}
+        />
+      )}
 
       {(isLoading || isMutating) && (
         <div className="flex justify-center p-4">

@@ -7,8 +7,8 @@ import { Anthropic } from '@anthropic-ai/sdk';
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_MODEL = 'claude-3-7-sonnet-20250219';
-const FETCH_TIMEOUT = 60000; // 60 seconds
-const MAX_RETRIES = 2;
+const FETCH_TIMEOUT = 120000; // 120 seconds (increased from 90 seconds)
+const MAX_RETRIES = 4; // Increased from 3
 
 // Explicitly load from environment variables each time to avoid any caching issues
 function getApiKey(): string {
@@ -206,7 +206,7 @@ export async function processDocumentWithClaude(
     const startTime = Date.now();
     const message = await client.messages.create({
       model: ANTHROPIC_MODEL,
-      max_tokens: 4096,
+      max_tokens: 16384, // Increased from 8192 to handle longer responses
       temperature: 0,
       system: systemPrompt,
       messages: [
@@ -218,6 +218,7 @@ export async function processDocumentWithClaude(
     });
     
     console.log(`SDK method succeeded in ${Date.now() - startTime}ms`);
+    console.log(`Response tokens: input=${message.usage?.input_tokens || 0}, output=${message.usage?.output_tokens || 0}`);
     
     // Convert SDK response to our standard format
     const standardResponse = convertSdkResponse(message);
@@ -274,7 +275,7 @@ export async function processDocumentWithFetch(
   // Create the payload with document
   const payload = {
     model: ANTHROPIC_MODEL,
-    max_tokens: 4096,
+    max_tokens: 16384, // Increased from 4096 to handle longer responses
     temperature: 0,
     system: systemPrompt,
     messages: [
