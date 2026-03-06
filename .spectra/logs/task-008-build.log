@@ -1,0 +1,1 @@
+Done. The fix was a single-line change: removed the unused `existsSync` import from `tests/replace-document.test.ts` line 2, which was the SIGN-001 violation flagged by the verifier. All 177 tests pass, TypeScript compiles clean, wiring checks pass.

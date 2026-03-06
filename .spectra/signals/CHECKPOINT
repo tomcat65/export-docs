@@ -1,12 +1,12 @@
 {
   "version": "5.0",
-  "completed": ["001","004","005","006"],
+  "completed": ["001","004","005","006","007"],
   "stuck": [],
   "in_progress": [],
-  "retry_counts": { "001": 1,"004": 3,"005": 3,"006": 3 },
-  "pass_history": "006, Task 004: FAIL->PASS, Task 001: PASS, Task 005: FAIL->PASS",
-  "failure_types": {},
-  "elapsed_seconds": 4854,
+  "retry_counts": { "001": 1,"004": 3,"005": 3,"006": 3,"007": 1,"008": 2 },
+  "pass_history": "006, Task 004: FAIL->PASS, Task 001: PASS, Task 005: FAIL->PASS, Task 007: PASS",
+  "failure_types": { "008": "test_failure" },
+  "elapsed_seconds": 5926,
   "branch": "spectra/run-20260305-220458",
-  "updated": "2026-03-06T13:31:22Z"
+  "updated": "2026-03-06T13:49:14Z"
 }

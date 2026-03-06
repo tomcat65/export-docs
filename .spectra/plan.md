@@ -135,7 +135,7 @@
   - Integration: relatedBolId links uploaded doc to parent BOL
 
 ## Task 008: BOL Document Folder — replace document (supersede)
-- [ ] 008: Replace button creates new Document record and marks old as superseded
+- [x] 008: Replace button creates new Document record and marks old as superseded
 - AC:
   - Replace button triggers new upload flow
   - Old GridFS file retained (immutable per constitution)
