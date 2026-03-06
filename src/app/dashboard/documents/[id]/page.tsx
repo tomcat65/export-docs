@@ -3,7 +3,6 @@
 import { useParams, useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
-import Link from 'next/link'
 import {
   ArrowLeft,
   Download,
