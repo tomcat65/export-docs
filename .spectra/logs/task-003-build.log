@@ -1,0 +1,7 @@
+Task 003 complete. Summary:
+
+- **Added NODE_ENV production guard** to all 10 debug route handlers under `src/app/api/debug/`
+- **Guard placement**: First line of each handler function, before any auth, DB, or API calls
+- **Guard response**: `NextResponse.json({ error: 'Not found' }, { status: 404 })` — exact match to AC
+- **Tests**: 33/33 passing — 30 static analysis tests (guard exists, correct response, correct placement for each file) + 2 integration tests (actual handler call with production → 404, development → non-404) + 1 discovery test
+- **Commit**: `11b06c6` — `feat(task-003): gate all /api/debug/* routes behind NODE_ENV production check`

@@ -35,7 +35,7 @@
   - CLI: grep "ANTHROPIC_MODEL" src/lib/claude.ts
 
 ## Task 003: Security Hardening — Gate debug endpoints behind NODE_ENV
-- [ ] 003: All /api/debug/* routes return 404 in production
+- [x] 003: All /api/debug/* routes return 404 in production
 - AC:
   - Every route handler in src/app/api/debug/ has NODE_ENV production guard at top
   - Guard returns NextResponse.json({ error: 'Not found' }, { status: 404 })

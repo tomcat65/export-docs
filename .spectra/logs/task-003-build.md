@@ -1,0 +1,23 @@
+## Build Report — Task 003: Gate debug endpoints behind NODE_ENV
+- Commit: 11b06c6
+- Tests: 33/33 passing
+- Wiring Proof: 5/5 checks passed
+  - CLI: grep -rl "NODE_ENV" src/app/api/debug/ | wc -l => 10 (all files guarded)
+  - Import invocation: guards are inline in existing route handlers (no new modules)
+  - Pipeline completeness: integration test calls actual GET handler with production/development NODE_ENV
+  - Error boundaries: returns clean JSON { error: 'Not found' } with 404 status
+  - Dependencies: no new dependencies
+- New Files: tests/debug-routes-guard.test.ts
+- Modified Files:
+  - src/app/api/debug/anthropic-test/route.ts
+  - src/app/api/debug/anthropic-debug/route.ts
+  - src/app/api/debug/force-carrier-ref/route.ts
+  - src/app/api/debug/add-carrier-ref/route.ts
+  - src/app/api/debug/database-check/route.ts
+  - src/app/api/debug/documents/route.ts
+  - src/app/api/debug/documents/repair/route.ts
+  - src/app/api/debug/documents/test/route.ts
+  - src/app/api/debug/gridfs/route.ts
+  - src/app/api/debug/test-claude/route.ts
+- Dependencies Added: none
+- Notes: All 10 debug route files (8 named in spec + 2 sub-routes under documents/) have production guard at top of handler, before any auth/DB/API logic. Guard returns exact response shape from AC: NextResponse.json({ error: 'Not found' }, { status: 404 }).
