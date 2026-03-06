@@ -18,7 +18,7 @@
   - CLI: grep -r "use client" src/lib/claude.ts | wc -l | grep -q '^0$'
 
 ## Task 002: Security Hardening — Update hardcoded Claude model to env var
-- [ ] 002: Replace claude-3-opus-20240229 with env var in fetchFromClaudeDirect
+- [x] 002: Replace claude-3-opus-20240229 with env var in fetchFromClaudeDirect
 - AC:
   - Hardcoded model string replaced with: process.env.ANTHROPIC_MODEL ?? 'claude-opus-4-6'
   - ANTHROPIC_MODEL=claude-opus-4-6 added to .env.example

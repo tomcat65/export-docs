@@ -1,5 +1,5 @@
 ## Build Report — Task 002: Security Hardening — Update hardcoded Claude model to env var
-- Commit: pending
+- Commit: 8a10b62
 - Tests: 5/5 passing (security-claude.test.ts)
 - Wiring Proof: 5/5 checks passed
   1. CLI: grep confirms no claude-3-opus-20240229 in src/, ANTHROPIC_MODEL in claude.ts

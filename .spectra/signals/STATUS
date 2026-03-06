@@ -1,8 +1,8 @@
 ## SPECTRA v5.0 Run Status
-- Current Task: 008
-- Task Title: BOL Document Folder — replace document (supersede)
-- Iteration: 2 / 3
-- Elapsed Time: 01:42:02
-- Pass History: 006, Task 004: FAIL->PASS, Task 001: PASS, Task 005: FAIL->PASS, Task 007: PASS
+- Current Task: 002
+- Task Title: Security Hardening — Update hardcoded Claude model to env var
+- Iteration: 1 / 2
+- Elapsed Time: 01:48:52
+- Pass History: 006, Task 004: FAIL->PASS, Task 001: PASS, Task 005: FAIL->PASS, Task 007: PASS, Task 008: FAIL->PASS
 - Current Agent: verifier
-- Last Updated: 2026-03-06T13:52:30Z
+- Last Updated: 2026-03-06T13:59:20Z

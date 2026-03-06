@@ -1,0 +1,12 @@
+## Summary
+
+**Task 002 complete.** All changes committed as `8a10b62`.
+
+**What was done:**
+1. **`src/lib/claude.ts`** — Replaced hardcoded `"claude-3-opus-20240229"` with `process.env.ANTHROPIC_MODEL ?? 'claude-opus-4-6'` in `fetchFromClaudeDirect`
+2. **`.env.example`** — Added `ANTHROPIC_MODEL=claude-opus-4-6` with comment
+3. **`tests/security-claude.test.ts`** — Added 2 tests:
+   - Verifies `claude-3-opus-20240229` is absent from source
+   - Verifies `process.env.ANTHROPIC_MODEL ?? 'claude-opus-4-6'` is present
+
+**Tests:** 5/5 passing | **Wiring:** all checks clean | **Verify command:** passed
