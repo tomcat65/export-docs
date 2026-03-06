@@ -94,13 +94,14 @@ export interface ProcessedDocument {
 export type AnthropicImageMime = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
 
 export function stripDataUri(data: string): string {
-  return data.replace(/^data:[^;]+;base64,/, '');
+  return data.replace(/^data:[^,]*,/, '');
 }
 
 export function normalizeImageMime(mime: string): AnthropicImageMime {
-  if (mime === 'image/jpg') return 'image/jpeg';
+  const cleaned = (mime || '').split(';')[0].trim().toLowerCase();
+  if (cleaned === 'image/jpg') return 'image/jpeg';
   const valid: AnthropicImageMime[] = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-  return valid.includes(mime as AnthropicImageMime) ? mime as AnthropicImageMime : 'image/jpeg';
+  return valid.includes(cleaned as AnthropicImageMime) ? cleaned as AnthropicImageMime : 'image/jpeg';
 }
 
 /**

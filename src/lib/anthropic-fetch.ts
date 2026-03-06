@@ -11,15 +11,16 @@ const FETCH_TIMEOUT = 120000; // 120 seconds (increased from 90 seconds)
 const MAX_RETRIES = 4; // Increased from 3
 
 export function stripDataUri(data: string): string {
-  return data.replace(/^data:[^;]+;base64,/, '');
+  return data.replace(/^data:[^,]*,/, '');
 }
 
 export type AnthropicImageMime = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
 
 export function normalizeImageMime(mime: string): AnthropicImageMime {
-  if (mime === 'image/jpg') return 'image/jpeg';
+  const cleaned = (mime || '').split(';')[0].trim().toLowerCase();
+  if (cleaned === 'image/jpg') return 'image/jpeg';
   const valid: AnthropicImageMime[] = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-  return valid.includes(mime as AnthropicImageMime) ? mime as AnthropicImageMime : 'image/jpeg';
+  return valid.includes(cleaned as AnthropicImageMime) ? cleaned as AnthropicImageMime : 'image/jpeg';
 }
 
 // Explicitly load from environment variables each time to avoid any caching issues

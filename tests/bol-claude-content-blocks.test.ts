@@ -19,6 +19,14 @@ describe('stripDataUri', () => {
   it('returns already-clean base64 unchanged', () => {
     expect(stripDataUri('alreadyclean')).toBe('alreadyclean')
   })
+
+  it('strips data URI with extra params (e.g. name=x.pdf)', () => {
+    expect(stripDataUri('data:application/pdf;name=x.pdf;base64,ABC')).toBe('ABC')
+  })
+
+  it('strips data URI with charset param', () => {
+    expect(stripDataUri('data:image/png;charset=utf-8;base64,XYZ')).toBe('XYZ')
+  })
 })
 
 describe('normalizeImageMime', () => {
@@ -48,6 +56,18 @@ describe('normalizeImageMime', () => {
 
   it('falls back to image/jpeg for empty string', () => {
     expect(normalizeImageMime('')).toBe('image/jpeg')
+  })
+
+  it('handles uppercase MIME types', () => {
+    expect(normalizeImageMime('IMAGE/PNG')).toBe('image/png')
+  })
+
+  it('handles MIME with params (e.g. charset)', () => {
+    expect(normalizeImageMime('image/png; charset=utf-8')).toBe('image/png')
+  })
+
+  it('normalizes IMAGE/JPG with params to image/jpeg', () => {
+    expect(normalizeImageMime('IMAGE/JPG; quality=high')).toBe('image/jpeg')
   })
 })
 
