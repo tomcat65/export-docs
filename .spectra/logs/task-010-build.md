@@ -1,0 +1,18 @@
+## Build Report — Task 010: Archive production remediation scripts
+- Commit: 4d78adb
+- Tests: N/A (file-move task, no runtime code)
+- Wiring Proof: PASS (spectra-verify clean)
+- New Files:
+  - scripts/archive/README.md
+  - scripts/archive/test-fix-mcop650126304.js
+  - scripts/archive/test-cleanup-bol.js
+  - scripts/archive/test-cleanup-specific-bol.js
+  - scripts/archive/test-cleanup-hlcusha2307adria.js
+  - scripts/archive/test-bol-diagnostics.js
+- Modified Files:
+  - .gitignore (added !/scripts/archive/ exception)
+- Dependencies Added: none
+- Notes:
+  - /scripts was gitignored; changed pattern from `/scripts` to `/scripts/*` with `!/scripts/archive/` negation so archive is tracked while other scripts remain ignored
+  - Original files preserved in project root per AC ("Original files NOT deleted")
+  - README documents each script's purpose, target BOL numbers, and incident context

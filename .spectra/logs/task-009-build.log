@@ -1,0 +1,14 @@
+Task 009 retry 2 is complete. Here's the summary:
+
+**Problem**: The verify command `npx tsc --noEmit 2>&1 | grep -q 'error'` was failing because `tests/debug-routes-guard.test.ts` had 3 TS2540 errors — TypeScript's strict mode marks `process.env.NODE_ENV` as read-only, so direct assignment fails type checking.
+
+**Fix**: Cast `process.env` to `any` at the 3 assignment sites:
+- `(process.env as any).NODE_ENV = originalNodeEnv` (afterEach cleanup)
+- `(process.env as any).NODE_ENV = 'production'` (production test)
+- `(process.env as any).NODE_ENV = 'development'` (development test)
+
+**Results**:
+- `npx tsc --noEmit`: 0 errors ✅
+- BillOfLading references in src/: 0 ✅
+- Tests: 33/33 passing ✅
+- Commit: `1b1a6fc`

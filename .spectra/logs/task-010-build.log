@@ -1,0 +1,13 @@
+Task 010 complete. Here's the summary:
+
+**What was done:**
+1. Created `scripts/archive/` directory
+2. Copied all 5 one-off remediation scripts to the archive:
+   - `test-fix-mcop650126304.js` — fixed misattributed BOL document
+   - `test-cleanup-bol.js` — purged BOL 650126304 via raw MongoClient
+   - `test-cleanup-specific-bol.js` — purged BOL 650126304 via Mongoose
+   - `test-cleanup-hlcusha2307adria.js` — cleaned ghost BOL from misattribution
+   - `test-bol-diagnostics.js` — end-to-end BOL extraction diagnostic
+3. Wrote `scripts/archive/README.md` documenting each script's purpose and incident context
+4. Updated `.gitignore` to allow `scripts/archive/` while keeping other scripts ignored (`/scripts/*` + `!/scripts/archive/`)
+5. Originals preserved in project root (not deleted, per AC)

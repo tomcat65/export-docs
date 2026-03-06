@@ -155,7 +155,7 @@
   - Integration: upload-associated route writes supersededBy reference to old Document record
 
 ## Task 009: Technical debt — BillOfLading legacy model audit
-- [ ] 009: Audit and retire BillOfLading legacy model if unused
+- [x] 009: Audit and retire BillOfLading legacy model if unused
 - AC:
   - Git checkpoint commit created before any deletion
   - grep covers static imports AND dynamic require() patterns
@@ -172,7 +172,7 @@
   - CLI: grep -r "BillOfLading" src/ --include="*.ts" --include="*.tsx" | wc -l | grep -q '^0$'
 
 ## Task 010: Technical debt — Archive production remediation scripts
-- [ ] 010: Move one-off fix scripts to scripts/archive/ with README
+- [x] 010: Move one-off fix scripts to scripts/archive/ with README
 - AC:
   - scripts/archive/ directory created
   - All test-fix-*.js, test-cleanup-*.js, test-bol-*.js moved to archive
