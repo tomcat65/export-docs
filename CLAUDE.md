@@ -44,7 +44,7 @@ All tasks require 5-check wiring proof before commit:
 - Reports: .spectra/logs/task-N-{build|verify|preflight}.md
 
 ## Plan Status
-- [ ] 001: Remove 'use client' directive and audit API key exposure
+- [x] 001: Remove 'use client' directive and audit API key exposure
 - [ ] 002: Replace claude-3-opus-20240229 with env var in fetchFromClaudeDirect
 - [ ] 003: All /api/debug/* routes return 404 in production
 - [x] 004: COO PDF generates correctly and matches coo-sample.pdf layout

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { connectDB } from '@/lib/db'
 import { Document } from '@/models/Document'
+import { buildContainerRows } from '@/lib/pl-utils'
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
 import mongoose from 'mongoose'
 import fs from 'fs'
@@ -11,57 +12,6 @@ import { Client } from '@/models/Client'
 interface GenerateRequest {
   mode?: 'overwrite' | 'new'
   poNumber?: string // Add Client PO number
-}
-
-// Helper function to extract product name from description
-function extractProductName(description: string): string {
-  if (!description) return '';
-  
-  // More aggressively remove packaging info patterns
-  const cleanedDesc = description
-    // Remove quantity + packaging type patterns like "1 FLEXI TANK" or "10 IBC"
-    .replace(/^\d+\s+(?:FLEXI\s+TANK|FLEXITANK|FLEXI-TANK|IBC|DRUM|DRUMS|CONTAINER|BULK|TOTE)s?\s+/i, '')
-    // Remove standalone packaging type patterns
-    .replace(/^FLEXI\s+TANK\s+|FLEXITANK\s+|FLEXI-TANK\s+|IBC\s+|DRUM\s+|DRUMS\s+|CONTAINER\s+|BULK\s+|TOTE\s+/i, '')
-    // Strip any remaining numeric prefixes that might be part of packaging
-    .replace(/^\d+\s+/, '')
-    .trim();
-  
-  console.log(`PL extractProductName transform: "${description}" -> "${cleanedDesc}"`);
-  return cleanedDesc;
-}
-
-// Helper to extract packaging type from description
-function extractPackagingType(description: string): { packagingType: string, packagingQty: number } {
-  if (!description) return { packagingType: 'Flexitank', packagingQty: 1 };
-  
-  // Check for common packaging formats in the description (e.g., "1 FLEXI TANK" or "10 IBC")
-  const packagingMatch = description.match(/^(\d+)\s+(?:(FLEXI\s+TANK|FLEXITANK|FLEXI-TANK|IBC|DRUM|DRUMS|CONTAINER|BULK|TOTE)s?)/i);
-  
-  if (packagingMatch) {
-    const qty = parseInt(packagingMatch[1], 10) || 1;
-    let type = packagingMatch[2].trim();
-    
-    // Normalize packaging names
-    if (/FLEXI\s+TANK|FLEXITANK|FLEXI-TANK/i.test(type)) {
-      type = 'Flexitank';
-    } else if (/IBC/i.test(type)) {
-      type = 'IBC';
-    } else if (/DRUM|DRUMS/i.test(type)) {
-      type = 'Drum';
-    } else if (/CONTAINER/i.test(type)) {
-      type = 'Container';
-    } else if (/BULK/i.test(type)) {
-      type = 'Bulk';
-    } else if (/TOTE/i.test(type)) {
-      type = 'Tote';
-    }
-    
-    return { packagingType: type, packagingQty: qty };
-  }
-  
-  // Default to Flexitank if no match is found
-  return { packagingType: 'Flexitank', packagingQty: 1 };
 }
 
 export async function POST(
@@ -445,215 +395,165 @@ export async function POST(
     })
     currentY -= lineHeight * 1.5;
     
-    // Get items from BOL document
+    // Get items from BOL document and build container rows using pl-utils
     const items = bolDocument.items || [];
-    
-    if (items.length > 0) {      
-      // Container table headers
-      const tableStartY = currentY;
-      
-      // Headers
-      const tableHeaders = ['Item', 'Container', 'Package Type', 'Product Description', 'Quantity'];
-      const colWidths = [40, 110, 90, 150, 50];
+    const containerRows = buildContainerRows(items);
+
+    if (containerRows.length > 0) {
+      // Container table headers — includes Seal, Liters, and Kg columns
+      const tableHeaders = ['#', 'Container', 'Seal', 'Product', 'Pkg', 'Liters', 'Kg'];
+      const colWidths = [25, 95, 75, 120, 55, 60, 62];
       const colStarts = [margin];
-      
+
       // Calculate column positions
       for (let i = 1; i < colWidths.length; i++) {
         colStarts[i] = colStarts[i-1] + colWidths[i-1];
       }
-      
-      // Draw header backgrounds with subtle shading - slightly darker for better visibility
-      page.drawRectangle({
-        x: margin,
-        y: currentY - 3,
-        width: contentWidth,
-        height: lineHeight + 6,
-        color: accentColor,
-        borderWidth: 0,
-      });
-      
-      // Draw header texts
-      for (let i = 0; i < tableHeaders.length; i++) {
-        page.drawText(tableHeaders[i], {
-          x: colStarts[i] + 5,
+
+      // Helper: draw table header row on a given page
+      const drawTableHeaders = (targetPage: typeof page, y: number) => {
+        targetPage.drawRectangle({
+          x: margin,
+          y: y - 3,
+          width: contentWidth,
+          height: lineHeight + 6,
+          color: accentColor,
+          borderWidth: 0,
+        });
+        for (let i = 0; i < tableHeaders.length; i++) {
+          targetPage.drawText(tableHeaders[i], {
+            x: colStarts[i] + 4,
+            y: y,
+            size: 8,
+            font: helveticaBold,
+            color: primaryColor,
+          });
+        }
+      };
+
+      drawTableHeaders(page, currentY);
+      currentY -= lineHeight + 8;
+
+      // Draw rows
+      let currentPage = page;
+      let rowIndex = 0;
+      let containerIndex = 0;
+      let prevContainer = '';
+
+      for (const row of containerRows) {
+        // Check if we need a new page
+        if (currentY < 100) {
+          const newPage = pdfDoc.addPage([612, 792]);
+          currentPage = newPage;
+          currentY = height - 70;
+
+          currentPage.drawText('Packing List (Continued)', {
+            x: width / 2 - 80,
+            y: currentY,
+            size: 12,
+            font: helveticaBold,
+            color: primaryColor,
+          });
+          currentY -= lineHeight * 2;
+
+          drawTableHeaders(currentPage, currentY);
+          currentY -= lineHeight + 8;
+          rowIndex = 0;
+        }
+
+        // Alternating row background
+        if (rowIndex % 2 === 1) {
+          currentPage.drawRectangle({
+            x: margin,
+            y: currentY - 3,
+            width: contentWidth,
+            height: lineHeight + 6,
+            color: rgb(0.97, 0.97, 0.97),
+            borderWidth: 0,
+          });
+        }
+
+        const isNewContainer = row.containerNumber !== '';
+
+        // Item number (only for first row of each container)
+        if (isNewContainer && row.containerNumber !== prevContainer) {
+          containerIndex++;
+          prevContainer = row.containerNumber;
+        }
+        if (isNewContainer) {
+          currentPage.drawText(containerIndex.toString(), {
+            x: colStarts[0] + 4,
+            y: currentY,
+            size: 8,
+            font: helveticaFont,
+            color: primaryColor,
+          });
+        }
+
+        // Container number
+        if (isNewContainer) {
+          currentPage.drawText(row.containerNumber, {
+            x: colStarts[1] + 4,
+            y: currentY,
+            size: 8,
+            font: helveticaFont,
+            color: primaryColor,
+          });
+        }
+
+        // Seal number
+        if (isNewContainer && row.sealNumber) {
+          currentPage.drawText(row.sealNumber, {
+            x: colStarts[2] + 4,
+            y: currentY,
+            size: 8,
+            font: helveticaFont,
+            color: primaryColor,
+          });
+        }
+
+        // Product description
+        currentPage.drawText(row.productDescription, {
+          x: colStarts[3] + 4,
           y: currentY,
-          size: 9,
-          font: helveticaBold,
+          size: 8,
+          font: helveticaFont,
           color: primaryColor,
         });
-      }
-      currentY -= lineHeight + 8;
-      
-      // Draw items
-      let currentPage = page;
-      
-      // Group items by container
-      const containerGroups = new Map();
-      
-      for (const item of items) {
-        const containerNum = item.containerNumber || '';
-        if (!containerGroups.has(containerNum)) {
-          containerGroups.set(containerNum, []);
-        }
-        containerGroups.get(containerNum).push(item);
-      }
-      
-      // Draw each container and its items
-      let rowIndex = 0;
-      let containerIndex = 1; // Counter for container items
-      
-      for (const [containerNum, containerItems] of containerGroups.entries()) {
-        // For each container, determine if we need to group by packaging type
-        const packagingGroups = new Map();
-        
-        for (const item of containerItems) {
-          // Get product description - prefer the product field if available
-          const productDesc = item.product || extractProductName(item.description) || item.description;
-          
-          // Get packaging info
-          const packaging = item.packaging || 'Flexitank';
-          let packagingQty = item.packagingQuantity || 1;
-          
-          // If no explicit packaging is provided, try to extract from description
-          if (!item.packaging && item.description) {
-            const extracted = extractPackagingType(item.description);
-            if (packaging === 'Flexitank') { // Only override if we're using the default
-              packagingQty = extracted.packagingQty;
-            }
-          }
-          
-          const packagingKey = `${packaging}:${productDesc}`;
-          
-          if (!packagingGroups.has(packagingKey)) {
-            packagingGroups.set(packagingKey, {
-              packagingType: packaging,
-              productDesc: productDesc,
-              quantity: 0
-            });
-          }
-          
-          // Increment the quantity for this packaging type
-          packagingGroups.get(packagingKey).quantity += packagingQty;
-        }
-        
-        // Now draw each packaging group for this container
-        let firstItemInContainer = true;
-        
-        for (const [_, packageInfo] of packagingGroups.entries()) {
-          // Check if we need a new page
-          if (currentY < 100) {
-            // Add a new page
-            const newPage = pdfDoc.addPage([612, 792]);
-            currentPage = newPage;
-            currentY = height - 70;
-            
-            // Add "Continued" header
-            currentPage.drawText('Packing List (Continued)', {
-              x: width / 2 - 80,
-              y: currentY,
-              size: 12,
-              font: helveticaBold,
-              color: primaryColor,
-            });
-            currentY -= lineHeight * 2;
-            
-            // Redraw table headers on new page
-            currentPage.drawRectangle({
-              x: margin,
-              y: currentY - 3,
-              width: contentWidth,
-              height: lineHeight + 6,
-              color: accentColor,
-              borderWidth: 0,
-            });
-            
-            for (let i = 0; i < tableHeaders.length; i++) {
-              currentPage.drawText(tableHeaders[i], {
-                x: colStarts[i] + 5,
-                y: currentY,
-                size: 9,
-                font: helveticaBold,
-                color: primaryColor,
-              });
-            }
-            currentY -= lineHeight + 8;
-            
-            // Reset the firstItemInContainer flag as we're on a new page
-            firstItemInContainer = true;
-            rowIndex = 0; // Reset row index for background shading
-          }
-          
-          // Add subtle alternating row background for readability
-          if (rowIndex % 2 === 1) {
-            currentPage.drawRectangle({
-              x: margin,
-              y: currentY - 3,
-              width: contentWidth,
-              height: lineHeight + 6,
-              color: rgb(0.97, 0.97, 0.97), // Very subtle gray
-              borderWidth: 0,
-            });
-          }
-          
-          // Draw item number only for the first entry of each container
-          if (firstItemInContainer) {
-            currentPage.drawText(containerIndex.toString(), {
-              x: colStarts[0] + 5,
-              y: currentY,
-              size: 9,
-              font: helveticaFont,
-              color: primaryColor,
-            });
-          }
-          
-          // Draw container number only for the first item in the container
-          if (firstItemInContainer) {
-            currentPage.drawText(containerNum, {
-              x: colStarts[1] + 5,
-              y: currentY,
-              size: 9,
-              font: helveticaFont,
-              color: primaryColor,
-            });
-            firstItemInContainer = false;
-          }
-          
-          // Draw package type
-          currentPage.drawText(packageInfo.packagingType, {
-            x: colStarts[2] + 5,
+
+        // Packaging type + qty
+        currentPage.drawText(`${row.packagingQty} ${row.packagingType}`, {
+          x: colStarts[4] + 4,
+          y: currentY,
+          size: 8,
+          font: helveticaFont,
+          color: primaryColor,
+        });
+
+        // Quantity — Liters
+        if (row.quantityLiters) {
+          currentPage.drawText(row.quantityLiters, {
+            x: colStarts[5] + 4,
             y: currentY,
-            size: 9,
+            size: 8,
             font: helveticaFont,
             color: primaryColor,
           });
-          
-          // Draw product description
-          currentPage.drawText(packageInfo.productDesc, {
-            x: colStarts[3] + 5,
-            y: currentY,
-            size: 9,
-            font: helveticaFont,
-            color: primaryColor,
-          });
-          
-          // Draw quantity
-          currentPage.drawText(packageInfo.quantity.toString(), {
-            x: colStarts[4] + 5,
-            y: currentY,
-            size: 9,
-            font: helveticaFont,
-            color: primaryColor,
-          });
-          
-          currentY -= lineHeight + 2;
-          rowIndex++;
         }
-        
-        // Increment container index for the next container
-        containerIndex++;
-        
-        // Add a small gap between containers
-        currentY -= 3;
+
+        // Quantity — Kg
+        if (row.quantityKg) {
+          currentPage.drawText(row.quantityKg, {
+            x: colStarts[6] + 4,
+            y: currentY,
+            size: 8,
+            font: helveticaFont,
+            color: primaryColor,
+          });
+        }
+
+        currentY -= lineHeight + 2;
+        rowIndex++;
       }
     }
     
