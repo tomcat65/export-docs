@@ -68,7 +68,7 @@ export async function POST(
       if (updatedValue && typeof updatedValue === 'object') {
         updatedValue = (updatedValue as any)[part]
       } else {
-        updatedValue = undefined
+        updatedValue = undefined as any
         break
       }
     }

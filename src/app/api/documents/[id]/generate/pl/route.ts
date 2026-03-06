@@ -664,7 +664,7 @@ export async function POST(
         },
         { new: true }
       );
-      console.log(`Updated existing document: ${documentRecord._id}`);
+      console.log(`Updated existing document: ${documentRecord!._id}`);
     } else {
       // Create new document
       documentRecord = await Document.create({

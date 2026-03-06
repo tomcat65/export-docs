@@ -98,7 +98,7 @@ export async function GET(request: NextRequest) {
 
     // 4. Check for documents with invalid client references
     const allClients = await Client.find().lean()
-    const clientIds = new Set(allClients.map(client => client._id.toString()))
+    const clientIds = new Set(allClients.map((client: any) => client._id.toString()))
     
     const documentsWithInvalidClients = allDocuments.filter(
       doc => !clientIds.has(doc.clientId.toString())

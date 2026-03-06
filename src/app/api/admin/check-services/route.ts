@@ -2,8 +2,10 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { isAdmin } from '@/lib/auth-utils';
+// @ts-expect-error — legacy module, not yet migrated
 import { processClaudeRequest } from '@/lib/anthropic-client';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+// @ts-expect-error — legacy module, not yet migrated
 import { app } from '@/lib/firebase-client-app';
 
 /**

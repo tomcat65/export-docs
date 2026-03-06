@@ -14,7 +14,7 @@ interface EditClientPageProps {
 
 async function getClient(id: string) {
   await connectDB()
-  const client = await Client.findById(id).lean()
+  const client = await Client.findById(id).lean() as any
   if (!client) return null
 
   return {

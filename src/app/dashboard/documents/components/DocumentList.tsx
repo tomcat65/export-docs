@@ -4,15 +4,24 @@ import { Download, RefreshCw, Trash2, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { DocumentIcon } from '@/components/DocumentIcon'
-import { Document } from '@/models/Document'
 import { formatDate } from '@/lib/utils'
 
+interface DocRecord {
+  _id: string
+  type: string
+  fileName: string
+  bolData?: { dateOfIssue?: string; bolNumber?: string; [k: string]: any }
+  relatedBolId?: string
+  relatedBolNumber?: string
+  [k: string]: any
+}
+
 interface DocumentListProps {
-  documents: Document[]
+  documents: DocRecord[]
   clientId?: string
-  onUpload?: (document: Document) => void
-  onDelete?: (document: Document) => void
-  onRegenerate?: (document: Document) => void
+  onUpload?: (document: DocRecord) => void
+  onDelete?: (document: DocRecord) => void
+  onRegenerate?: (document: DocRecord) => void
 }
 
 export function DocumentList({ documents, clientId, onUpload, onDelete, onRegenerate }: DocumentListProps) {
@@ -117,7 +126,7 @@ export function DocumentList({ documents, clientId, onUpload, onDelete, onRegene
           >
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <DocumentIcon type={doc.type} />
+                <DocumentIcon type={doc.type as any} />
                 <span className="font-medium truncate">{doc.fileName}</span>
               </div>
               

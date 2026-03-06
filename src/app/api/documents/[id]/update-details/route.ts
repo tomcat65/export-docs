@@ -46,24 +46,26 @@ export async function POST(
 
     // Update document details
     if (!document.packingListData) {
-      document.packingListData = {}
+      document.packingListData = {} as any
     }
+
+    const plData = document.packingListData!
 
     // Update fields if provided
     if (updateData.documentNumber !== undefined) {
-      document.packingListData.documentNumber = updateData.documentNumber
+      plData.documentNumber = updateData.documentNumber
     }
-    
+
     if (updateData.date !== undefined) {
-      document.packingListData.date = updateData.date
+      plData.date = updateData.date
     }
-    
+
     if (updateData.poNumber !== undefined) {
       // Ensure poNumber is stored as a string, even if empty
       const poNumber = String(updateData.poNumber) // Use String() for explicit conversion
-      document.packingListData.poNumber = poNumber
+      plData.poNumber = poNumber
       console.log(`Setting poNumber to: "${poNumber}" (type: ${typeof poNumber})`)
-      
+
       // Also perform a direct update to ensure the field is set
       await Document.updateOne(
         { _id: id },
@@ -75,10 +77,10 @@ export async function POST(
     // Save the updated document
     await document.save()
     console.log('Updated document details:', {
-      documentNumber: document.packingListData.documentNumber,
-      date: document.packingListData.date,
-      poNumber: document.packingListData.poNumber,
-      poNumberType: typeof document.packingListData.poNumber
+      documentNumber: plData.documentNumber,
+      date: plData.date,
+      poNumber: plData.poNumber,
+      poNumberType: typeof plData.poNumber
     })
 
     // Make sure we're working with the latest data - add proper type annotation

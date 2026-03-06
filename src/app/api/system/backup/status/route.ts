@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
     
     // Get backup status from database
     try {
-      const status = await SystemStatus.findOne({ type: 'backup' })
+      const status = await (SystemStatus as mongoose.Model<any>).findOne({ type: 'backup' })
       
       return NextResponse.json({ 
         status: status || { 

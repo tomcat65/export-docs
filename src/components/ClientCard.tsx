@@ -31,7 +31,7 @@ export function ClientCard({ client }: ClientCardProps) {
           <div>
             <span className="text-sm text-muted-foreground">Last Document:</span>
             <span className="ml-2">
-              {client.lastDocument ? formatDate(client.lastDocument) : 'No documents yet'}
+              {client.lastDocument ? formatDate(client.lastDocument.toISOString()) : 'No documents yet'}
             </span>
           </div>
         </div>

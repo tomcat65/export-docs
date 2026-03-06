@@ -811,7 +811,7 @@ export async function POST(
 
     // Try to get the BOL date directly from the document, then from bolData relationship,
     // and finally try a direct query as a last resort
-    let dateOfIssue = bolDocument.dateOfIssue || (bolDocument.bolData && bolDocument.bolData.dateOfIssue);
+    let dateOfIssue = (bolDocument as any).dateOfIssue || (bolDocument.bolData && bolDocument.bolData.dateOfIssue);
     
     // If we still don't have a date, try to look it up separately
     if (!dateOfIssue && bolDocument.bolData && bolDocument.bolData.bolNumber) {
@@ -902,8 +902,8 @@ export async function POST(
     // Debug logging for enhanced clarity
     console.log("==================== COO DATE DIAGNOSTIC ====================");
     console.log("RAW bolDocument:", {
-      hasDateOfIssue: !!bolDocument.dateOfIssue,
-      dateOfIssue: bolDocument.dateOfIssue || "NOT SET",
+      hasDateOfIssue: !!(bolDocument as any).dateOfIssue,
+      dateOfIssue: (bolDocument as any).dateOfIssue || "NOT SET",
       hasBolData: !!bolDocument.bolData,
       bolDataDateOfIssue: bolDocument.bolData?.dateOfIssue || "NOT SET",
       bolNumber: bolDocument.bolData?.bolNumber || "NOT SET"
@@ -933,10 +933,10 @@ export async function POST(
         console.log("⚠️ WARNING: No BOL date found, checking for backups...");
         
         // Additional fallback to other sources in bolDocument
-        if (bolDocument.dateOfIssue) {
-          businessDateObj = new Date(bolDocument.dateOfIssue);
+        if ((bolDocument as any).dateOfIssue) {
+          businessDateObj = new Date((bolDocument as any).dateOfIssue);
           dateSource = "bolDocument.dateOfIssue (fallback)";
-          console.log("Using fallback date from bolDocument.dateOfIssue:", bolDocument.dateOfIssue);
+          console.log("Using fallback date from bolDocument.dateOfIssue:", (bolDocument as any).dateOfIssue);
         } else {
           // Only use today's date if absolutely necessary
           console.log("❌ CRITICAL: No date available from BOL, using today's date as a last resort");
@@ -1297,9 +1297,9 @@ export async function POST(
       
       // Finally, fall back to the BOL data field if available
       () => {
-        if (bolDocument.bolData && bolDocument.bolData.commodity) {
-          console.log("Using commodity from BOL data:", bolDocument.bolData.commodity);
-          return extractProductName(bolDocument.bolData.commodity);
+        if (bolDocument.bolData && (bolDocument.bolData as any).commodity) {
+          console.log("Using commodity from BOL data:", (bolDocument.bolData as any).commodity);
+          return extractProductName((bolDocument.bolData as any).commodity);
         }
         return null;
       }

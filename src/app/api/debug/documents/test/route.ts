@@ -28,12 +28,12 @@ export async function GET(request: NextRequest) {
     }
 
     // Get collections list
-    const collections = await mongoose.connection.db.listCollections().toArray()
+    const collections = await mongoose.connection.db!.listCollections().toArray()
     console.log(`Test API: Found ${collections.length} collections`)
     
     // Get counts of documents in each collection
     const countPromises = collections.map(async (collection) => {
-      const count = await mongoose.connection.db.collection(collection.name).countDocuments()
+      const count = await mongoose.connection.db!.collection(collection.name).countDocuments()
       return { name: collection.name, count }
     })
     

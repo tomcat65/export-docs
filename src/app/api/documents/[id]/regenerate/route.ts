@@ -155,9 +155,9 @@ export async function POST(
     const freshDocument = await Document.findById(id).lean() as IDocument | null;
     if (freshDocument?.packingListData?.poNumber !== undefined && 
         document.packingListData &&
-        document.packingListData.poNumber === undefined) {
+        document.packingListData!.poNumber === undefined) {
       console.log(`Updating document with fresh data from database - poNumber: "${freshDocument.packingListData.poNumber}"`);
-      document.packingListData.poNumber = freshDocument.packingListData.poNumber;
+      document.packingListData!.poNumber = freshDocument.packingListData.poNumber;
     }
 
     // Download the existing PDF
@@ -223,11 +223,11 @@ export async function POST(
       // Apply test poNumber if provided (for debugging)
       if (testPoNumber !== null && testPoNumber !== undefined) {
         console.log(`Using test poNumber: "${testPoNumber}" instead of stored value`);
-        document.packingListData.poNumber = String(testPoNumber);
+        document.packingListData!.poNumber = String(testPoNumber);
       }
       
       // If poNumber is not explicitly set, check database directly to ensure we didn't miss it
-      if (document.packingListData.poNumber === undefined || document.packingListData.poNumber === null) {
+      if (document.packingListData!.poNumber === undefined || document.packingListData!.poNumber === null) {
         console.log('No poNumber value found in document object, doing a direct database query');
         
         const dbCheck = await Document.findById(document._id)
@@ -236,31 +236,31 @@ export async function POST(
           
         if (dbCheck?.packingListData?.poNumber) {
           console.log(`Found poNumber in database that was missing in document: "${dbCheck.packingListData.poNumber}"`);
-          document.packingListData.poNumber = dbCheck.packingListData.poNumber;
+          document.packingListData!.poNumber = dbCheck.packingListData.poNumber;
         }
       }
       
       // Final check - set to empty string if still undefined/null
-      if (document.packingListData.poNumber === undefined || document.packingListData.poNumber === null) {
+      if (document.packingListData!.poNumber === undefined || document.packingListData!.poNumber === null) {
         console.log('Setting poNumber to empty string as fallback');
-        document.packingListData.poNumber = '';
+        document.packingListData!.poNumber = '';
       }
       
       // Log the raw poNumber value to debug
       console.log('Raw poNumber value:', {
-        value: document.packingListData.poNumber,
-        type: typeof document.packingListData.poNumber,
-        isEmpty: document.packingListData.poNumber === '',
-        isUndefined: document.packingListData.poNumber === undefined,
-        isNull: document.packingListData.poNumber === null
+        value: document.packingListData!.poNumber,
+        type: typeof document.packingListData!.poNumber,
+        isEmpty: document.packingListData!.poNumber === '',
+        isUndefined: document.packingListData!.poNumber === undefined,
+        isNull: document.packingListData!.poNumber === null
       });
       
       console.log('Updating document details with:', {
-        documentNumber: document.packingListData.documentNumber,
-        date: document.packingListData.date,
-        poNumber: document.packingListData.poNumber === undefined || document.packingListData.poNumber === null 
+        documentNumber: document.packingListData!.documentNumber,
+        date: document.packingListData!.date,
+        poNumber: document.packingListData!.poNumber === undefined || document.packingListData!.poNumber === null 
           ? '(empty)' 
-          : `"${document.packingListData.poNumber}"`
+          : `"${document.packingListData!.poNumber}"`
       });
       
       try {
@@ -394,8 +394,8 @@ export async function POST(
             color: primaryColor
           });
           
-          if (document.packingListData.documentNumber) {
-            page.drawText(document.packingListData.documentNumber, {
+          if (document.packingListData!.documentNumber) {
+            page.drawText(document.packingListData!.documentNumber, {
               x: location.docNumValueX!,
               y: location.docNumValueY!,
               size: 9,
@@ -413,8 +413,8 @@ export async function POST(
             color: primaryColor
           });
           
-          if (document.packingListData.date) {
-            page.drawText(document.packingListData.date, {
+          if (document.packingListData!.date) {
+            page.drawText(document.packingListData!.date, {
               x: location.dateValueX!,
               y: location.dateValueY!,
               size: 9,
@@ -433,9 +433,9 @@ export async function POST(
           });
           
           // Draw PO number or underline if empty
-          if (document.packingListData.poNumber !== undefined && 
-              document.packingListData.poNumber !== null) {
-            const poValue = String(document.packingListData.poNumber);
+          if (document.packingListData!.poNumber !== undefined && 
+              document.packingListData!.poNumber !== null) {
+            const poValue = String(document.packingListData!.poNumber);
             console.log(`Drawing PO number: "${poValue}" (length: ${poValue.length})`);
             
             // Draw the PO number value (even if it's an empty string)

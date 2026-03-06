@@ -478,7 +478,7 @@ export async function POST(
             bolNumber: existingDocument.bolData?.bolNumber,
             carrierReference: existingDocument.bolData?.carrierReference,
             totalWeight: existingDocument.bolData?.totalWeight,
-            hasContainers: Boolean(existingDocument.bolData?.containers?.length)
+            hasContainers: Boolean((existingDocument.bolData as any)?.containers?.length)
           }));
           
           // Even if we have BOL data, we should still process with Claude to get the carrier's reference
@@ -975,9 +975,9 @@ export async function POST(
         await existingDocument.save();
 
         // Update all the custom fields with clean data
-        if (existingDocument.customFields) {
-          existingDocument.customFields = {
-            ...existingDocument.customFields,
+        if ((existingDocument as any).customFields) {
+          (existingDocument as any).customFields = {
+            ...(existingDocument as any).customFields,
             totalContainers: processedData?.containers.length?.toString() || '0',
             containers: processedData?.containers || [],
             parties: processedData?.parties || {
