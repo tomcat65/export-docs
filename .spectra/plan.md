@@ -2,7 +2,7 @@
 # Project: docu-export | Level: 3 | Track: bmad_method
 
 ## Task 001: Security Hardening — Remove 'use client' from claude.ts
-- [ ] 001: Remove 'use client' directive and audit API key exposure
+- [x] 001: Remove 'use client' directive and audit API key exposure
 - AC:
   - 'use client' directive removed from src/lib/claude.ts
   - File confirmed server-only (no client component imports it)
