@@ -95,3 +95,14 @@ Used to test BOL processing outside of the Next.js app during debugging.
 
 **Purpose:** Direct Anthropic API integration test.
 Used to verify Claude vision API access and BOL extraction prompts in isolation.
+
+---
+
+### test-firebase.js / test-firebase.cjs
+**Purpose:** Manual Firebase connection and function invocation tests during setup.
+
+### test-firebase-function.js / test-firebase-function.cjs
+**Purpose:** Direct test of the processBolDocument Firebase Cloud Function during debugging.
+
+### test-claude-integration.js
+**Purpose:** Direct Anthropic API integration test to verify Claude vision access and BOL extraction prompts.
