@@ -48,7 +48,7 @@ All tasks require 5-check wiring proof before commit:
 - [ ] 002: Replace claude-3-opus-20240229 with env var in fetchFromClaudeDirect
 - [ ] 003: All /api/debug/* routes return 404 in production
 - [x] 004: COO PDF generates correctly and matches coo-sample.pdf layout
-- [ ] 005: Packing List PDF generates correctly
+- [x] 005: Packing List PDF generates correctly
 - [ ] 006: Dashboard shows all documents per BOL in a single folder view
 - [ ] 007: User can upload Invoice, COA, SED PDFs and associate them to a BOL
 - [ ] 008: Replace button creates new Document record and marks old as superseded
