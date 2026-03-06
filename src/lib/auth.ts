@@ -17,7 +17,7 @@ export const authOptions = {
       authorization: {
         params: {
           redirect_uri: process.env.NODE_ENV === 'production' 
-            ? 'https://txwos-docs.fyi/api/auth/callback/google'
+            ? 'https://www.txwos-docs.fyi/api/auth/callback/google'
             : 'http://localhost:3000/api/auth/callback/google'
         }
       }
