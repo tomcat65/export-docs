@@ -1,12 +1,12 @@
 {
   "version": "5.0",
-  "completed": ["006"],
+  "completed": ["004","006"],
   "stuck": [],
   "in_progress": [],
-  "retry_counts": { "004": 3, "005": 3, "006": 3 },
-  "pass_history": "006",
+  "retry_counts": { "004": 3,"005": 3,"006": 3 },
+  "pass_history": "006, Task 004: FAIL->PASS",
   "failure_types": {},
-  "elapsed_seconds": 3778,
+  "elapsed_seconds": 4130,
   "branch": "spectra/run-20260305-220458",
-  "updated": "2026-03-06T05:07:56Z"
+  "updated": "2026-03-06T13:19:18Z"
 }

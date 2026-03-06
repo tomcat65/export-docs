@@ -1,15 +1,10 @@
-Task 001 complete. Here's the summary:
+Task 001 is already fully complete with a detailed build report. There's nothing to do here.
 
-## Task 001 — Complete
+**Summary:** Task 001 was already completed in a prior session (commits `9ea183c` and `ed27ee2`). The plan marks it `[x]`. Re-verification confirms all acceptance criteria still hold:
 
-**What was done:**
-- Removed `'use client'` directive from line 1 of `src/lib/claude.ts`
-- Verified no client components import from this file (0 matches)
-- `ANTHROPIC_API_KEY` is only accessed via `process.env` (server-side safe)
+1. ✅ `'use client'` directive: NOT present in `src/lib/claude.ts` 
+2. ✅ No client components import the file
+3. ✅ `ANTHROPIC_API_KEY` only accessed server-side via `process.env`
+4. ✅ Build report, verify report, and preflight report all exist
 
-**Tests:** 3/3 passing (`tests/security-claude.test.ts`)
-1. No `'use client'` directive present
-2. API key accessed only via `process.env`
-3. No client component imports this file
-
-**Commit:** `9ea183c` — `feat(task-001): Remove 'use client' directive from claude.ts for security`
+The next unchecked task is **Task 002**: Replace `claude-3-opus-20240229` with env var in `fetchFromClaudeDirect`.
