@@ -13,11 +13,11 @@ generation of international export compliance documents from uploaded Bills of L
 ### The Core Flow
 
 ```
-Admin uploads BOL PDF
+Admin uploads BOL (PDF, JPEG, PNG, or other image format)
        │
        ▼
 Next.js API (/api/documents/upload)
-  └─ Saves PDF to MongoDB GridFS
+  └─ Saves file to MongoDB GridFS
   └─ Calls Firebase Cloud Function (processBolDocument)
            │
            ▼
@@ -222,7 +222,7 @@ firebase emulators:start --only functions
 ### Documents
 | Route | Method | Purpose |
 |---|---|---|
-| `/api/documents/upload` | POST | Upload a BOL PDF; triggers Claude extraction |
+| `/api/documents/upload` | POST | Upload a BOL (PDF or image); triggers Claude extraction |
 | `/api/documents/[id]` | GET | Get document metadata |
 | `/api/documents/[id]/documents` | GET | Get all documents linked to a BOL (folder view) |
 | `/api/documents/[id]/generate/coo` | POST | Generate COO PDF for a BOL |
