@@ -26,6 +26,7 @@ if (!API_KEY) {
 interface DocumentRequest {
   type: 'pdf' | 'image';
   data: string; // Base64 encoded document data
+  mimeType?: string;
 }
 
 export interface ShipmentDetails {
@@ -88,6 +89,19 @@ export interface ProcessedDocument {
       lbs: string;
     };
   };
+}
+
+export type AnthropicImageMime = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+
+export function stripDataUri(data: string): string {
+  return data.replace(/^data:[^,]*,/, '');
+}
+
+export function normalizeImageMime(mime: string): AnthropicImageMime {
+  const cleaned = (mime || '').split(';')[0].trim().toLowerCase();
+  if (cleaned === 'image/jpg') return 'image/jpeg';
+  const valid: AnthropicImageMime[] = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  return valid.includes(cleaned as AnthropicImageMime) ? cleaned as AnthropicImageMime : 'image/jpeg';
 }
 
 /**
@@ -198,24 +212,23 @@ Return this EXACT JSON structure with the values found:
     }
   }
 }
-
-This is the document data: ${document.data}`;
+`;
 
     // Call Claude API with timeout handling - increased to 120 seconds
     const timeoutPromise = new Promise<never>((_, reject) => {
       setTimeout(() => reject(new Error('Claude API request timed out after 120 seconds')), 120000);
     });
 
-    // Use the most appropriate model for document processing
-    // claude-3-7-sonnet-20250219 provides a good balance of accuracy and speed for document analysis
+    const docBlock = document.type === 'pdf'
+      ? { type: 'document' as const, source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: stripDataUri(document.data) } }
+      : { type: 'image' as const, source: { type: 'base64' as const, media_type: normalizeImageMime(document.mimeType || 'image/jpeg'), data: stripDataUri(document.data) } };
+
     const apiPromise = anthropic.messages.create({
-      model: 'claude-3-7-sonnet-20250219', // Updated to Claude 3.7 Sonnet model
-      max_tokens: 4096, // Keep the same token limit
-      temperature: 0.0, // Deterministic output for consistency
+      model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
+      max_tokens: 8192,
+      temperature: 0.0,
       system: systemPrompt,
-      messages: [
-        { role: 'user', content: userPrompt }
-      ]
+      messages: [{ role: 'user', content: [{ type: 'text' as const, text: userPrompt }, docBlock] }]
     });
 
     // Race between API call and timeout

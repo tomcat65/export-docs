@@ -1,4 +1,4 @@
-import { processDocumentWithClaude as processWithClaude } from './anthropic-fetch';
+import { processDocumentWithClaude as processWithClaude, stripDataUri, normalizeImageMime } from './anthropic-fetch';
 import type { AnthropicResponse } from './anthropic-fetch';
 
 interface Container {
@@ -66,7 +66,7 @@ interface ProcessedDocument {
 
 // This is the main entry point for BOL document processing - OPTIMIZED WITH TIMEOUT
 export async function processDocumentWithClaude(
-  document: { type: 'pdf' | 'image'; data: string },
+  document: { type: 'pdf' | 'image'; data: string; mimeType?: string },
   template?: string
 ): Promise<ProcessedDocument> {
   console.time('claude-processing');
@@ -203,9 +203,10 @@ Return this EXACT JSON structure with the values found:
 }`;
 
       // Optimize: Reduce document size to prevent timeouts while keeping enough content for processing
-      const optimizedData = { 
-        type: document.type, 
-        data: compressDocumentData(document.data) 
+      const optimizedData = {
+        type: document.type,
+        data: compressDocumentData(document.data),
+        mimeType: document.mimeType
       };
 
       // Call the implementation in anthropic-fetch.ts or fallback to direct implementation
@@ -421,15 +422,15 @@ function extractBolNumberFromData(data: string): string | null {
 }
 
 // Direct implementation of Claude API calling as a backup
-async function fetchFromClaudeDirect(document: { type: 'pdf' | 'image', data: string }): Promise<ProcessedDocument> {
+async function fetchFromClaudeDirect(document: { type: 'pdf' | 'image', data: string, mimeType?: string }): Promise<ProcessedDocument> {
   const API_KEY = process.env.ANTHROPIC_API_KEY;
-  
+
   if (!API_KEY) {
     throw new Error('ANTHROPIC_API_KEY is not set in the environment variables');
   }
-  
+
   // Determine prompt based on document type
-  const systemPrompt = `You are a skilled document extractor, specialized in extracting information from bills of lading. 
+  const systemPrompt = `You are a skilled document extractor, specialized in extracting information from bills of lading.
   Extract all relevant information from the document and format it as a JSON object with the following structure:
   {
     "shipmentDetails": {
@@ -470,21 +471,24 @@ async function fetchFromClaudeDirect(document: { type: 'pdf' | 'image', data: st
       }
     }
   }
-  
+
   Only output the JSON object, nothing else. If you can't find a specific field, use an empty string.`;
 
-  const userPrompt = 
-    document.type === 'pdf' ? 
-      `This is a PDF of a bill of lading. Extract all the relevant information from it: ${document.data}` : 
-      `This is an image of a bill of lading. Extract all the relevant information from it: ${document.data}`;
+  const userPrompt = document.type === 'pdf'
+    ? 'This is a PDF of a bill of lading. Extract all the relevant information from it.'
+    : 'This is an image of a bill of lading. Extract all the relevant information from it.';
+
+  const docBlock = document.type === 'pdf'
+    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: stripDataUri(document.data) } }
+    : { type: 'image', source: { type: 'base64', media_type: normalizeImageMime(document.mimeType || 'image/jpeg'), data: stripDataUri(document.data) } };
 
   const payload = {
-    model: process.env.ANTHROPIC_MODEL ?? 'claude-opus-4-6',
+    model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6',
     max_tokens: 4000,
     temperature: 0.0,
     system: systemPrompt,
     messages: [
-      { role: "user", content: userPrompt }
+      { role: "user", content: [{ type: "text", text: userPrompt }, docBlock] }
     ]
   };
 

@@ -512,7 +512,7 @@ export async function POST(
             newProcessedData = await processBolWithFirebase({
               fileContent: documentData.data,
               fileName: file.name,
-              fileType: documentData.type === 'pdf' ? 'application/pdf' : 'image/jpeg',
+              fileType: file.type || (documentData.type === 'pdf' ? 'application/pdf' : 'image/jpeg'),
               clientId: params.id
             }) as FirebaseBolResponse;
             console.log('Successfully extracted data from replacement document')
@@ -712,7 +712,7 @@ export async function POST(
         const result = await processBolWithFirebase({
           fileContent: documentData.data,
           fileName: file.name,
-          fileType: documentData.type === 'pdf' ? 'application/pdf' : 'image/jpeg',
+          fileType: file.type || (documentData.type === 'pdf' ? 'application/pdf' : 'image/jpeg'),
           clientId: params.id as string
         }) as FirebaseBolResponse;
         

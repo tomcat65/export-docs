@@ -122,13 +122,17 @@ exports.processBolDocument = functions
       
       while (retryCount <= maxRetries) {
         try {
-          // Log document type
-          console.log(`Document type: ${data.fileType.includes("pdf") ? "pdf" : "image"}`);
-          
+          // Determine canonical document type from MIME and filename
+          const isPdf = data.fileType.toLowerCase().includes("pdf") ||
+            data.fileName.toLowerCase().endsWith(".pdf");
+          const docType = isPdf ? "pdf" : "image";
+          console.log(`Document type: ${docType} (fileType: ${data.fileType})`);
+
           // Process document with Claude
           const result = await processDocumentWithClaude({
-            type: data.fileType.includes("pdf") ? "pdf" : "image",
-            data: data.fileContent
+            type: docType,
+            data: data.fileContent,
+            mimeType: isPdf ? "application/pdf" : data.fileType
           });
           
           // Upload the document to Firebase Storage

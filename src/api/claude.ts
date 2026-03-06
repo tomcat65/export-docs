@@ -79,17 +79,21 @@ interface FirebaseBolResponse {
  * @returns Processed document information
  */
 export async function processDocumentWithClaude(
-  document: { type: 'pdf' | 'image'; data: string },
+  document: { type: 'pdf' | 'image'; data: string; mimeType?: string },
   clientId: string
 ): Promise<ProcessedDocument> {
   try {
     console.log(`Delegating ${document.type} document processing to Firebase`);
-    
+
+    // Use provided mimeType or derive from type field
+    const fileType = document.mimeType
+      || (document.type === 'pdf' ? 'application/pdf' : 'image/jpeg');
+
     // Call Firebase function to process the document
     const result = await processBolWithFirebase({
       fileContent: document.data,
       fileName: `document.${document.type === 'pdf' ? 'pdf' : 'jpg'}`, // Default filename
-      fileType: document.type === 'pdf' ? 'application/pdf' : 'image/jpeg',
+      fileType,
       clientId
     }) as FirebaseBolResponse;
     

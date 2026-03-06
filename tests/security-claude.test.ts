@@ -25,9 +25,9 @@ describe('Security: src/lib/claude.ts', () => {
     expect(claudeFileContent).not.toContain('claude-3-opus-20240229')
   })
 
-  it('should use ANTHROPIC_MODEL env var with claude-opus-4-6 default', () => {
+  it('should use ANTHROPIC_MODEL env var with claude-sonnet-4-6 default', () => {
     // The model must be read from env with a fallback
-    expect(claudeFileContent).toContain("process.env.ANTHROPIC_MODEL ?? 'claude-opus-4-6'")
+    expect(claudeFileContent).toContain("process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6'")
   })
 
   it('should not be imported by any client component', () => {

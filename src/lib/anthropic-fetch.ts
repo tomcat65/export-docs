@@ -6,9 +6,22 @@
 import { Anthropic } from '@anthropic-ai/sdk';
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
-const ANTHROPIC_MODEL = 'claude-3-7-sonnet-20250219';
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6';
 const FETCH_TIMEOUT = 120000; // 120 seconds (increased from 90 seconds)
 const MAX_RETRIES = 4; // Increased from 3
+
+export function stripDataUri(data: string): string {
+  return data.replace(/^data:[^,]*,/, '');
+}
+
+export type AnthropicImageMime = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+
+export function normalizeImageMime(mime: string): AnthropicImageMime {
+  const cleaned = (mime || '').split(';')[0].trim().toLowerCase();
+  if (cleaned === 'image/jpg') return 'image/jpeg';
+  const valid: AnthropicImageMime[] = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  return valid.includes(cleaned as AnthropicImageMime) ? cleaned as AnthropicImageMime : 'image/jpeg';
+}
 
 // Explicitly load from environment variables each time to avoid any caching issues
 function getApiKey(): string {
@@ -150,7 +163,7 @@ async function fetchWithRetry(
  * Will try SDK first, then fall back to fetch if needed
  */
 export async function processDocumentWithClaude(
-  document: { type: 'pdf' | 'image'; data: string },
+  document: { type: 'pdf' | 'image'; data: string; mimeType?: string },
   systemPrompt: string,
   userPrompt: string
 ): Promise<AnthropicResponse> {
@@ -175,7 +188,7 @@ export async function processDocumentWithClaude(
         source: {
           type: 'base64' as const,
           media_type: 'application/pdf' as const,
-          data: document.data.replace(/^data:application\/pdf;base64,/, '')
+          data: stripDataUri(document.data)
         }
       }
     ];
@@ -189,8 +202,8 @@ export async function processDocumentWithClaude(
         type: 'image' as const,
         source: {
           type: 'base64' as const,
-          media_type: 'image/png' as const,
-          data: document.data.replace(/^data:image\/png;base64,/, '')
+          media_type: normalizeImageMime(document.mimeType || 'image/jpeg'),
+          data: stripDataUri(document.data)
         }
       }
     ];
@@ -243,7 +256,7 @@ export async function processDocumentWithClaude(
  * This function bypasses the SDK entirely and uses a direct API call with proper headers
  */
 export async function processDocumentWithFetch(
-  document: { type: 'pdf' | 'image'; data: string },
+  document: { type: 'pdf' | 'image'; data: string; mimeType?: string },
   systemPrompt: string,
   userPrompt: string
 ): Promise<AnthropicResponse> {
@@ -260,15 +273,15 @@ export async function processDocumentWithFetch(
         source: {
           type: 'base64',
           media_type: 'application/pdf',
-          data: document.data.replace(/^data:application\/pdf;base64,/, '')
+          data: stripDataUri(document.data)
         }
       }
     : {
         type: 'image',
         source: {
           type: 'base64',
-          media_type: 'image/png',
-          data: document.data.replace(/^data:image\/png;base64,/, '')
+          media_type: normalizeImageMime(document.mimeType || 'image/jpeg'),
+          data: stripDataUri(document.data)
         }
       };
 
