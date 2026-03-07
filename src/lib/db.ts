@@ -20,7 +20,6 @@ export async function connectDB() {
 
   if (!cached.mongoose.promise) {
     console.log('Creating new database connection')
-    console.log('MongoDB URI:', MONGODB_URI)
     
     const opts = {
       bufferCommands: false,

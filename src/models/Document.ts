@@ -1,5 +1,47 @@
 import mongoose from 'mongoose'
 
+// Valid status values used across all routes
+export const VALID_STATUSES = [
+  'active', 'superseded', 'processing', 'processed',
+  'duplicate', 'verification_failed', 'error'
+] as const;
+
+export type DocumentStatus = typeof VALID_STATUSES[number];
+
+export interface IExtractedContainer {
+  containerNumber?: string
+  sealNumber?: string
+  size?: string
+  type?: string
+  weight?: { kg?: string; lbs?: string }
+  volume?: string
+  packages?: string
+  description?: string
+  [key: string]: any
+}
+
+export interface IExtractedParties {
+  shipper?: { name?: string; address?: string; taxId?: string; [key: string]: any }
+  consignee?: { name?: string; address?: string; taxId?: string; [key: string]: any }
+  notifyParty?: { name?: string; address?: string; [key: string]: any }
+  [key: string]: any
+}
+
+export interface IExtractedCommercial {
+  currency?: string
+  freightTerms?: string
+  itnNumber?: string
+  totalWeight?: { kg?: string; lbs?: string }
+  [key: string]: any
+}
+
+export interface IExtractedData {
+  containers?: IExtractedContainer[]
+  parties?: IExtractedParties
+  commercial?: IExtractedCommercial
+  meta?: any  // Escape hatch for unexpected Claude output
+}
+
 export interface IDocument {
   clientId: mongoose.Types.ObjectId
   fileName: string
@@ -71,7 +113,8 @@ export interface IDocument {
       lbs: string
     }
   }
-  status?: 'active' | 'superseded'
+  extractedData?: IExtractedData
+  status?: DocumentStatus
   supersededBy?: mongoose.Types.ObjectId
   createdAt: Date
   updatedAt: Date
@@ -79,7 +122,7 @@ export interface IDocument {
 
 // Valid document types constant that can be used across the application
 export const VALID_DOCUMENT_TYPES = [
-  'BOL', 'PL', 'COO', 'INVOICE_EXPORT', 'INVOICE', 'COA', 'SED', 
+  'BOL', 'PL', 'COO', 'INVOICE_EXPORT', 'INVOICE', 'COA', 'SED',
   'DATA_SHEET', 'SAFETY_SHEET', 'INSURANCE'
 ] as const;
 
@@ -176,9 +219,33 @@ const documentSchema = new mongoose.Schema<IDocument>({
       lbs: String
     }
   },
+  extractedData: {
+    containers: [{
+      containerNumber: String,
+      sealNumber: String,
+      size: String,
+      type: String,
+      weight: { kg: String, lbs: String },
+      volume: String,
+      packages: String,
+      description: String,
+    }],
+    parties: {
+      shipper: { name: String, address: String, taxId: String },
+      consignee: { name: String, address: String, taxId: String },
+      notifyParty: { name: String, address: String },
+    },
+    commercial: {
+      currency: String,
+      freightTerms: String,
+      itnNumber: String,
+      totalWeight: { kg: String, lbs: String },
+    },
+    meta: mongoose.Schema.Types.Mixed,
+  },
   status: {
     type: String,
-    enum: ['active', 'superseded'],
+    enum: VALID_STATUSES,
     default: 'active',
   },
   supersededBy: {
@@ -197,6 +264,6 @@ documentSchema.index({ relatedBolId: 1 });
 documentSchema.index({ relatedBolId: 1, status: 1 });
 
 // Create and export the model, safely handling HMR
-export const Document = mongoose.models.Document 
-  ? (mongoose.models.Document as mongoose.Model<IDocument>) 
-  : mongoose.model<IDocument>('Document', documentSchema); 
+export const Document = mongoose.models.Document
+  ? (mongoose.models.Document as mongoose.Model<IDocument>)
+  : mongoose.model<IDocument>('Document', documentSchema);
