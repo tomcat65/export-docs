@@ -23,7 +23,7 @@ describe('Document model: status + supersededBy fields', () => {
   const modelContent = readFileSync(modelPath, 'utf-8')
 
   it('IDocument interface has status field', () => {
-    expect(modelContent).toContain("status?: 'active' | 'superseded'")
+    expect(modelContent).toContain("status?: DocumentStatus")
   })
 
   it('IDocument interface has supersededBy field', () => {
@@ -31,7 +31,7 @@ describe('Document model: status + supersededBy fields', () => {
   })
 
   it('schema defines status with enum and default active', () => {
-    expect(modelContent).toContain("enum: ['active', 'superseded']")
+    expect(modelContent).toContain("enum: VALID_STATUSES")
     expect(modelContent).toContain("default: 'active'")
   })
 

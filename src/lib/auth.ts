@@ -41,10 +41,12 @@ export const authOptions = {
   },
   callbacks: {
     async signIn({ user, account }: { user: User, account: Account | null }) {
-      console.log('SignIn callback triggered:', { 
-        email: user.email,
-        provider: account?.provider 
-      })
+      if (process.env.NODE_ENV === 'development') {
+        console.log('SignIn callback triggered:', {
+          email: user.email,
+          provider: account?.provider
+        })
+      }
       
       if (account?.provider === 'google') {
         try {
@@ -52,20 +54,14 @@ export const authOptions = {
           await connectDB()
           
           const adminUser = await AdminUser.findOne({ email: user.email?.toLowerCase() })
-          console.log('Admin user lookup result:', { 
-            found: !!adminUser,
-            email: user.email?.toLowerCase()
-          })
           
           if (adminUser) {
             // Update last login
             await AdminUser.findByIdAndUpdate(adminUser._id, {
               lastLogin: new Date()
             })
-            console.log('Updated last login timestamp')
             return true
           }
-          console.log('No matching admin user found')
         } catch (error) {
           console.error('Error in signIn callback:', error)
         }
@@ -77,14 +73,11 @@ export const authOptions = {
     async jwt({ token }: { token: JWT }) {
       try {
         if (token?.email) {
-          console.log('JWT callback triggered:', { email: token.email })
-          
           await connectDB()
-          
+
           const adminUser = await AdminUser.findOne({ email: token.email.toLowerCase() })
-          
+
           if (adminUser) {
-            console.log('JWT admin status set:', { isAdmin: true })
             token.isAdmin = true
             
             // Email-based name mapping for known users - this should take priority
@@ -114,9 +107,7 @@ export const authOptions = {
               ).join(' ');
             }
             
-            console.log('Setting user name:', { email: token.email, name: token.name });
           } else {
-            console.log('JWT admin status set:', { isAdmin: false })
             token.isAdmin = false
           }
         }
@@ -133,9 +124,7 @@ export const authOptions = {
     async session({ session, token }: { session: Session, token: JWT }) {
       try {
         if (session?.user) {
-          console.log('Session callback triggered')
           session.user.isAdmin = !!token.isAdmin
-          console.log('Session admin status set:', { email: session.user.email, isAdmin: session.user.isAdmin })
         }
       } catch (error) {
         console.error('Error in session callback:', error)

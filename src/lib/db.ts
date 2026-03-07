@@ -20,7 +20,6 @@ export async function connectDB() {
 
   if (!cached.mongoose.promise) {
     console.log('Creating new database connection')
-    console.log('MongoDB URI:', MONGODB_URI)
     
     const opts = {
       bufferCommands: false,
@@ -33,10 +32,7 @@ export async function connectDB() {
   try {
     console.log('Awaiting database connection...')
     cached.mongoose.conn = await cached.mongoose.promise
-    console.log('Successfully connected to database:', {
-      db: cached.mongoose.conn.connection.db.databaseName,
-      collections: await cached.mongoose.conn.connection.db.listCollections().toArray()
-    })
+    console.log('Successfully connected to database')
   } catch (e) {
     console.error('Error connecting to database:', e)
     cached.mongoose.promise = null
