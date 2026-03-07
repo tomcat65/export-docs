@@ -233,7 +233,7 @@ const documentSchema = new mongoose.Schema<IDocument>({
       containerNumber: String,
       sealNumber: String,
       size: String,
-      type: String,
+      type: { type: String },
       weight: { kg: String, lbs: String },
       volume: String,
       packages: String,
