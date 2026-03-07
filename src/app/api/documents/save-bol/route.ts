@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth'
 import { connectDB } from '@/lib/db'
 import { Document } from '@/models/Document'
 import { Client } from '@/models/Client'
+import { itemsFromExtractedContainers } from '@/lib/pl-utils'
 import mongoose from 'mongoose'
 
 const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg']
@@ -16,6 +17,7 @@ function normalizeText(text: string): string {
     .replace(/\s+/g, ' ')
     .trim()
 }
+
 
 /**
  * Lightweight save-only route for BOL documents.
@@ -197,6 +199,9 @@ export async function POST(request: NextRequest) {
     // Track the uploaded file ID for cleanup on failure
     uploadedFileId = uploadStream.id
 
+    // Build items array from extracted containers for PL/COO generators
+    const items = itemsFromExtractedContainers(containers)
+
     // Create document record with pre-extracted data
     const newDocument = await Document.create({
       clientId,
@@ -222,6 +227,7 @@ export async function POST(request: NextRequest) {
         parties: parties || {},
         commercial: commercial || {},
       },
+      items,
     })
 
     console.log(`Document saved: ${newDocument._id} (BOL: ${bolNumber})`)

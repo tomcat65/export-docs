@@ -238,6 +238,16 @@ const documentSchema = new mongoose.Schema<IDocument>({
       volume: String,
       packages: String,
       description: String,
+      // New: structured line items per container
+      lineItems: [{
+        product: String,
+        hsCode: String,
+        packaging: String,
+        packagingQuantity: Number,
+        volume: { liters: Number, gallons: Number },
+        weight: { kg: Number, lbs: Number, mt: Number },
+      }],
+      // Legacy: single product per container
       product: {
         name: String,
         description: String,

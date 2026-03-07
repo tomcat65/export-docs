@@ -13,13 +13,14 @@ export function extractProductName(description: string): string {
     'flexitank', 'flexi tank', 'flexi-tank',
     'iso tank', 'isotank', 'iso-tank',
     'drum', 'drums', 'barrel', 'barrels',
-    'container', 'bulk', 'ibc', 'tote'
+    'pail', 'pails',
+    'container', 'bulk', 'ibc', 'tote', 'totes'
   ];
 
   const packagingPattern = new RegExp(`\\b(${packagingTerms.join('|')})\\b`, 'gi');
 
   let cleanedDesc = description
-    .replace(/^\d+\s+(?:FLEXI\s+TANK|FLEXITANK|FLEXI-TANK|IBC|DRUM|DRUMS|CONTAINER|BULK|TOTE)s?\s+/i, '')
+    .replace(/^\d+\s+(?:FLEXI\s+TANK|FLEXITANK|FLEXI-TANK|IBC|DRUM|DRUMS|PAIL|PAILS|BARREL|BARRELS|CONTAINER|BULK|TOTE|TOTES)s?\s+/i, '')
     .replace(packagingPattern, '')
     .replace(/^\d+\s+/, '')
     .replace(/^X\s+/i, '')

@@ -3,6 +3,7 @@ import {
   extractProductName,
   extractPackagingType,
   buildContainerRows,
+  itemsFromExtractedContainers,
 } from '../src/lib/pl-utils'
 import type { BolItem } from '../src/lib/pl-utils'
 
@@ -48,14 +49,24 @@ describe('extractPackagingType', () => {
     expect(result).toEqual({ packagingType: 'Drum', packagingQty: 10 })
   })
 
-  it('defaults to Flexitank for empty string', () => {
+  it('returns empty packaging type for empty string', () => {
     const result = extractPackagingType('')
-    expect(result).toEqual({ packagingType: 'Flexitank', packagingQty: 1 })
+    expect(result).toEqual({ packagingType: '', packagingQty: 1 })
   })
 
-  it('defaults to Flexitank for unrecognized format', () => {
+  it('returns empty packaging type for unrecognized format', () => {
     const result = extractPackagingType('Base Oil Group II 600N')
-    expect(result).toEqual({ packagingType: 'Flexitank', packagingQty: 1 })
+    expect(result).toEqual({ packagingType: '', packagingQty: 1 })
+  })
+
+  it('extracts pail packaging', () => {
+    const result = extractPackagingType('50 PAILS Base Oil 150N')
+    expect(result).toEqual({ packagingType: 'Pail', packagingQty: 50 })
+  })
+
+  it('extracts packaging from anywhere in description', () => {
+    const result = extractPackagingType('Contains 20 DRUMS of Base Oil')
+    expect(result).toEqual({ packagingType: 'Drum', packagingQty: 20 })
   })
 
   it('extracts flexi tank (two words)', () => {
@@ -210,5 +221,101 @@ describe('buildContainerRows', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0].quantityLiters).toBe('')
     expect(rows[0].quantityKg).toBe('')
+  })
+})
+
+describe('itemsFromExtractedContainers', () => {
+  it('returns empty array for undefined/empty input', () => {
+    expect(itemsFromExtractedContainers(undefined)).toEqual([])
+    expect(itemsFromExtractedContainers([])).toEqual([])
+  })
+
+  it('maps new lineItems format without regex', () => {
+    const containers = [{
+      containerNumber: 'MRKU123',
+      sealNumber: '99999',
+      lineItems: [
+        {
+          product: 'Base Oil Group II 600N',
+          hsCode: '2710.19',
+          packaging: 'Flexitank',
+          packagingQuantity: 1,
+          volume: { liters: 23680, gallons: 6255 },
+          weight: { kg: 20729.17, lbs: 45688, mt: 20.73 },
+        },
+      ],
+    }]
+    const items = itemsFromExtractedContainers(containers)
+    expect(items).toHaveLength(1)
+    expect(items[0].containerNumber).toBe('MRKU123')
+    expect(items[0].seal).toBe('99999')
+    expect(items[0].product).toBe('Base Oil Group II 600N')
+    expect(items[0].packaging).toBe('Flexitank')
+    expect(items[0].packagingQuantity).toBe(1)
+    expect(items[0].quantity?.litros).toBe('23680.00')
+    expect(items[0].quantity?.kg).toBe('20729.170')
+  })
+
+  it('maps multiple lineItems per container', () => {
+    const containers = [{
+      containerNumber: 'TCLU456',
+      sealNumber: '11111',
+      lineItems: [
+        { product: 'Base Oil 600N', packaging: 'IBC', packagingQuantity: 10, volume: { liters: 8000 }, weight: { kg: 7200 } },
+        { product: 'Base Oil 150N', packaging: 'Drum', packagingQuantity: 20, volume: { liters: 4000 }, weight: { kg: 3600 } },
+        { product: 'Grease', packaging: 'Pail', packagingQuantity: 50, volume: { liters: 500 }, weight: { kg: 600 } },
+      ],
+    }]
+    const items = itemsFromExtractedContainers(containers)
+    expect(items).toHaveLength(3)
+    expect(items[0].packaging).toBe('IBC')
+    expect(items[0].packagingQuantity).toBe(10)
+    expect(items[1].packaging).toBe('Drum')
+    expect(items[1].packagingQuantity).toBe(20)
+    expect(items[2].packaging).toBe('Pail')
+    expect(items[2].packagingQuantity).toBe(50)
+    // All share the same container number
+    expect(items[0].containerNumber).toBe('TCLU456')
+    expect(items[1].containerNumber).toBe('TCLU456')
+    expect(items[2].containerNumber).toBe('TCLU456')
+  })
+
+  it('preserves packagingQuantity of 0', () => {
+    const containers = [{
+      containerNumber: 'CONT001',
+      sealNumber: '00000',
+      lineItems: [{ product: 'Oil', packaging: 'Bulk', packagingQuantity: 0, volume: { liters: 1000 }, weight: { kg: 900 } }],
+    }]
+    const items = itemsFromExtractedContainers(containers)
+    expect(items[0].packagingQuantity).toBe(0)
+  })
+
+  it('falls back to legacy product/quantity format', () => {
+    const containers = [{
+      containerNumber: 'LEGACY001',
+      sealNumber: '55555',
+      product: { name: 'Base Oil 600N', description: '1 FLEXITANK Base Oil 600N', hsCode: '' },
+      quantity: { volume: { liters: 23000 }, weight: { kg: 20000 } },
+    }]
+    const items = itemsFromExtractedContainers(containers)
+    expect(items).toHaveLength(1)
+    expect(items[0].product).toBe('Base Oil 600N')
+    expect(items[0].description).toBe('1 FLEXITANK Base Oil 600N')
+    expect(items[0].packaging).toBe('Flexitank')
+    expect(items[0].quantity?.litros).toBe('23000.00')
+  })
+
+  it('handles legacy container with top-level description fallback', () => {
+    const containers = [{
+      containerNumber: 'OLD001',
+      sealNumber: '33333',
+      description: '20 DRUMS Base Oil 150N',
+      quantity: { volume: { liters: 4000 }, weight: { kg: 3600 } },
+    }]
+    const items = itemsFromExtractedContainers(containers)
+    expect(items).toHaveLength(1)
+    expect(items[0].product).toBe('20 DRUMS Base Oil 150N')
+    expect(items[0].packaging).toBe('Drum')
+    expect(items[0].packagingQuantity).toBe(20)
   })
 })

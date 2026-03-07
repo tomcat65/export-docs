@@ -11,10 +11,10 @@ export function extractProductName(description: string): string {
   if (!description) return '';
 
   const cleanedDesc = description
-    // Remove quantity + packaging type patterns like "1 FLEXI TANK" or "10 IBC"
-    .replace(/^\d+\s+(?:FLEXI\s+TANK|FLEXITANK|FLEXI-TANK|IBC|DRUM|DRUMS|CONTAINER|BULK|TOTE)s?\s+/i, '')
+    // Remove quantity + packaging type patterns like "1 FLEXI TANK", "10 IBC", "20 DRUMS", "5 PAILS"
+    .replace(/^\d+\s+(?:FLEXI\s+TANK|FLEXITANK|FLEXI-TANK|IBC|DRUM|DRUMS|PAIL|PAILS|BARREL|BARRELS|CONTAINER|BULK|TOTE|TOTES)s?\s+/i, '')
     // Remove standalone packaging type patterns
-    .replace(/^FLEXI\s+TANK\s+|FLEXITANK\s+|FLEXI-TANK\s+|IBC\s+|DRUM\s+|DRUMS\s+|CONTAINER\s+|BULK\s+|TOTE\s+/i, '')
+    .replace(/^(?:FLEXI\s+TANK|FLEXITANK|FLEXI-TANK|IBC|DRUM|DRUMS|PAIL|PAILS|BARREL|BARRELS|CONTAINER|BULK|TOTE|TOTES)\s+/i, '')
     // Strip any remaining numeric prefixes that might be part of packaging
     .replace(/^\d+\s+/, '')
     .trim();
@@ -27,10 +27,10 @@ export function extractProductName(description: string): string {
  * e.g. "1 FLEXI TANK ..." -> { packagingType: 'Flexitank', packagingQty: 1 }
  */
 export function extractPackagingType(description: string): { packagingType: string; packagingQty: number } {
-  if (!description) return { packagingType: 'Flexitank', packagingQty: 1 };
+  if (!description) return { packagingType: '', packagingQty: 1 };
 
   const packagingMatch = description.match(
-    /^(\d+)\s+(?:(FLEXI\s+TANK|FLEXITANK|FLEXI-TANK|IBC|DRUM|DRUMS|CONTAINER|BULK|TOTE)s?)/i
+    /^(\d+)\s+(?:(FLEXI\s+TANK|FLEXITANK|FLEXI-TANK|IBC|DRUM|DRUMS|PAIL|PAILS|CONTAINER|BULK|TOTE)s?)/i
   );
 
   if (packagingMatch) {
@@ -43,6 +43,8 @@ export function extractPackagingType(description: string): { packagingType: stri
       type = 'IBC';
     } else if (/DRUM|DRUMS/i.test(type)) {
       type = 'Drum';
+    } else if (/PAIL|PAILS/i.test(type)) {
+      type = 'Pail';
     } else if (/CONTAINER/i.test(type)) {
       type = 'Container';
     } else if (/BULK/i.test(type)) {
@@ -54,7 +56,95 @@ export function extractPackagingType(description: string): { packagingType: stri
     return { packagingType: type, packagingQty: qty };
   }
 
-  return { packagingType: 'Flexitank', packagingQty: 1 };
+  // Check for packaging terms anywhere in the description (not just at start)
+  const anywhereMatch = description.match(
+    /(\d+)\s*[xX]?\s*(?:(FLEXI[\s-]?TANK|ISO[\s-]?TANK|IBC|DRUM|DRUMS|PAIL|PAILS|TOTE|TOTES|BARREL|BARRELS|CONTAINER|CONTAINERS|BULK)s?)/i
+  );
+
+  if (anywhereMatch) {
+    const qty = parseInt(anywhereMatch[1], 10) || 1;
+    const raw = anywhereMatch[2].trim();
+
+    if (/FLEXI/i.test(raw)) return { packagingType: 'Flexitank', packagingQty: qty };
+    if (/ISO/i.test(raw)) return { packagingType: 'Iso Tank', packagingQty: qty };
+    if (/IBC/i.test(raw)) return { packagingType: 'IBC', packagingQty: qty };
+    if (/DRUM/i.test(raw)) return { packagingType: 'Drum', packagingQty: qty };
+    if (/PAIL/i.test(raw)) return { packagingType: 'Pail', packagingQty: qty };
+    if (/TOTE/i.test(raw)) return { packagingType: 'Tote', packagingQty: qty };
+    if (/BARREL/i.test(raw)) return { packagingType: 'Barrel', packagingQty: qty };
+    if (/CONTAINER/i.test(raw)) return { packagingType: 'Container', packagingQty: qty };
+    if (/BULK/i.test(raw)) return { packagingType: 'Bulk', packagingQty: qty };
+  }
+
+  return { packagingType: '', packagingQty: 1 };
+}
+
+/**
+ * Derive items array from extractedData.containers (Claude's raw output).
+ * Used as a fallback when bolDocument.items was never populated.
+ *
+ * Supports two formats:
+ * - New: container.lineItems[] with packaging/product/volume/weight per line
+ * - Legacy: container.product.name + container.product.description + container.quantity
+ */
+export function itemsFromExtractedContainers(containers: any[] | undefined): BolItem[] {
+  if (!containers || containers.length === 0) return [];
+
+  const items: BolItem[] = [];
+  let itemNum = 0;
+
+  for (const c of containers) {
+    const containerNumber = c.containerNumber || '';
+    const seal = c.sealNumber || '';
+
+    // New format: lineItems array (one entry per product/packaging in this container)
+    if (Array.isArray(c.lineItems) && c.lineItems.length > 0) {
+      for (const li of c.lineItems) {
+        itemNum++;
+        items.push({
+          itemNumber: itemNum,
+          containerNumber,
+          seal,
+          description: li.product || '',
+          product: li.product || '',
+          packaging: li.packaging || '',
+          packagingQuantity: typeof li.packagingQuantity === 'number' ? li.packagingQuantity : 1,
+          quantity: {
+            litros: typeof li.volume?.liters === 'number' ? li.volume.liters.toFixed(2) : '0',
+            kg: typeof li.weight?.kg === 'number' ? li.weight.kg.toFixed(3) : '0',
+          },
+        });
+      }
+      continue;
+    }
+
+    // Legacy format: single product per container
+    itemNum++;
+    const productName = c.product?.name || '';
+    const description = c.product?.description || c.description || '';
+    // Only fall back to regex for legacy data that didn't have explicit packaging
+    const { packagingType, packagingQty } = extractPackagingType(description);
+
+    items.push({
+      itemNumber: itemNum,
+      containerNumber,
+      seal,
+      description,
+      product: productName || description,
+      packaging: packagingType,
+      packagingQuantity: packagingQty,
+      quantity: {
+        litros: typeof c.quantity?.volume?.liters === 'number'
+          ? c.quantity.volume.liters.toFixed(2)
+          : '0',
+        kg: typeof c.quantity?.weight?.kg === 'number'
+          ? c.quantity.weight.kg.toFixed(3)
+          : '0',
+      },
+    });
+  }
+
+  return items;
 }
 
 /**
@@ -126,15 +216,14 @@ export function buildContainerRows(items: BolItem[]): ContainerRow[] {
 
     for (const item of containerItems) {
       const productDesc = item.product || extractProductName(item.description || '') || item.description || '';
-      const packaging = item.packaging || 'Flexitank';
-      let packagingQty = item.packagingQuantity || 1;
+      let packaging = item.packaging || '';
+      let packagingQty = typeof item.packagingQuantity === 'number' ? item.packagingQuantity : 1;
 
       // If no explicit packaging, try to extract from description
-      if (!item.packaging && item.description) {
+      if (!packaging && item.description) {
         const extracted = extractPackagingType(item.description);
-        if (packaging === 'Flexitank') {
-          packagingQty = extracted.packagingQty;
-        }
+        packaging = extracted.packagingType || '';
+        packagingQty = extracted.packagingQty;
       }
 
       const packagingKey = `${packaging}:${productDesc}`;

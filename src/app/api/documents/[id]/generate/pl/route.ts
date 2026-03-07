@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { connectDB } from '@/lib/db'
 import { Document } from '@/models/Document'
-import { buildContainerRows } from '@/lib/pl-utils'
+import { buildContainerRows, itemsFromExtractedContainers } from '@/lib/pl-utils'
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
 import mongoose from 'mongoose'
 import fs from 'fs'
@@ -395,8 +395,10 @@ export async function POST(
     })
     currentY -= lineHeight * 1.5;
     
-    // Get items from BOL document and build container rows using pl-utils
-    const items = bolDocument.items || [];
+    // Get items from BOL document; fall back to extractedData.containers for older docs
+    const items = (bolDocument.items && bolDocument.items.length > 0)
+      ? bolDocument.items
+      : itemsFromExtractedContainers(bolDocument.extractedData?.containers);
     const containerRows = buildContainerRows(items);
 
     if (containerRows.length > 0) {

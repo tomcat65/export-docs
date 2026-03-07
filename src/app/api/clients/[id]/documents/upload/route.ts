@@ -6,17 +6,10 @@ import { Document } from '@/models/Document'
 import { processBolWithFirebase } from '@/lib/firebase-client'
 import mongoose from 'mongoose'
 import { Readable } from 'stream'
+import { itemsFromExtractedContainers } from '@/lib/pl-utils'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-// Define interface for Firebase response
-interface FirebaseBolResponse {
-  success: boolean;
-  error?: string;
-  document: ProcessedDocument;
-  fallback?: boolean;
-}
 
 // Define interface for processed document from Firebase
 interface ProcessedDocument {
@@ -332,7 +325,8 @@ function extractProductAndPackaging(description: string): { product: string, pac
     'flexitank', 'flexi tank', 'flexi-tank',
     'iso tank', 'isotank', 'iso-tank',
     'drum', 'drums', 'barrel', 'barrels',
-    'container', 'bulk', 'ibc', 'tote'
+    'pail', 'pails',
+    'container', 'bulk', 'ibc', 'tote', 'totes'
   ];
   
   // Default values
@@ -506,15 +500,15 @@ export async function POST(
             throw new Error('Document data is required for processing')
           }
           
-          let newProcessedData: FirebaseBolResponse;
+          let newProcessedData: any;
           try {
-            // Convert the document data to the format expected by Firebase
+            // processBolWithFirebase returns the document directly (already unwrapped)
             newProcessedData = await processBolWithFirebase({
               fileContent: documentData.data,
               fileName: file.name,
               fileType: file.type || (documentData.type === 'pdf' ? 'application/pdf' : 'image/jpeg'),
               clientId: params.id
-            }) as FirebaseBolResponse;
+            });
             console.log('Successfully extracted data from replacement document')
           } catch (claudeError) {
             console.error('Error extracting data from replacement document:', claudeError)
@@ -551,7 +545,7 @@ export async function POST(
             })
           }
           
-          if (newProcessedData && newProcessedData.success && existingDocument.bolData) {
+          if (newProcessedData && existingDocument.bolData) {
             // Create a clean object for totalWeight that matches the expected schema format
             let totalWeight;
 
@@ -566,15 +560,22 @@ export async function POST(
                 lbs: existingDocument.bolData.totalWeight.lbs
               };
               console.log('Using existing totalWeight structure');
-            } else if (newProcessedData.document && 
-                       newProcessedData.document.containers && 
-                       newProcessedData.document.containers.length > 0) {
-              // Calculate totalWeight from containers if needed
+            } else if (newProcessedData.containers &&
+                       newProcessedData.containers.length > 0) {
+              // Calculate totalWeight from containers (handles both lineItems and legacy formats)
               totalWeight = {
-                kg: newProcessedData.document.containers.reduce((sum: number, container: any) => 
-                  sum + (container.quantity?.weight?.kg || 0), 0).toFixed(3),
-                lbs: newProcessedData.document.containers.reduce((sum: number, container: any) => 
-                  sum + (container.quantity?.weight?.lbs || 0), 0).toFixed(2)
+                kg: newProcessedData.containers.reduce((sum: number, container: any) => {
+                  if (Array.isArray(container.lineItems)) {
+                    return sum + container.lineItems.reduce((s: number, li: any) => s + (li.weight?.kg || 0), 0);
+                  }
+                  return sum + (container.quantity?.weight?.kg || 0);
+                }, 0).toFixed(3),
+                lbs: newProcessedData.containers.reduce((sum: number, container: any) => {
+                  if (Array.isArray(container.lineItems)) {
+                    return sum + container.lineItems.reduce((s: number, li: any) => s + (li.weight?.lbs || 0), 0);
+                  }
+                  return sum + (container.quantity?.weight?.lbs || 0);
+                }, 0).toFixed(2)
               };
               console.log('Calculated new totalWeight from containers');
             } else {
@@ -609,7 +610,7 @@ export async function POST(
             
             // Log the carrier reference from the newly extracted data
             console.log('Extracted carrier reference from replacement document:', {
-              carrierReference: newProcessedData.document.shipmentDetails.carrierReference,
+              carrierReference: newProcessedData.shipmentDetails.carrierReference,
               existingCarrierReference: existingDocument.bolData.carrierReference
             })
             
@@ -617,10 +618,10 @@ export async function POST(
             const updatedBolData = {
               ...existingDocument.bolData,
               // Prioritize newly extracted data for these fields
-              carrierReference: newProcessedData.document.shipmentDetails.carrierReference || existingDocument.bolData.carrierReference,
-              bookingNumber: newProcessedData.document.shipmentDetails.bookingNumber || existingDocument.bolData.bookingNumber,
-              vessel: newProcessedData.document.shipmentDetails.vesselName || existingDocument.bolData.vessel,
-              voyage: newProcessedData.document.shipmentDetails.voyageNumber || existingDocument.bolData.voyage,
+              carrierReference: newProcessedData.shipmentDetails.carrierReference || existingDocument.bolData.carrierReference,
+              bookingNumber: newProcessedData.shipmentDetails.bookingNumber || existingDocument.bolData.bookingNumber,
+              vessel: newProcessedData.shipmentDetails.vesselName || existingDocument.bolData.vessel,
+              voyage: newProcessedData.shipmentDetails.voyageNumber || existingDocument.bolData.voyage,
               // Use the clean totalWeight object
               totalWeight: totalWeight
             }
@@ -657,7 +658,7 @@ export async function POST(
               // Just update the file ID and carrier reference directly
               try {
                 console.log('Attempting direct update with findByIdAndUpdate...');
-                console.log('Setting carrier reference to:', newProcessedData.document.shipmentDetails.carrierReference);
+                console.log('Setting carrier reference to:', newProcessedData.shipmentDetails.carrierReference);
                 
                 // Use a direct update to set just the carrier reference field
                 // This avoids schema validation issues
@@ -667,7 +668,7 @@ export async function POST(
                     $set: { 
                       fileId: uploadStream.id,
                       updatedAt: new Date(),
-                      'bolData.carrierReference': newProcessedData.document.shipmentDetails.carrierReference 
+                      'bolData.carrierReference': newProcessedData.shipmentDetails.carrierReference 
                     } 
                   },
                   { new: true }
@@ -714,10 +715,10 @@ export async function POST(
           fileName: file.name,
           fileType: file.type || (documentData.type === 'pdf' ? 'application/pdf' : 'image/jpeg'),
           clientId: params.id as string
-        }) as FirebaseBolResponse;
-        
-        // Set processedData from the Firebase response
-        processedData = result.document;
+        });
+
+        // processBolWithFirebase returns the document directly (already unwrapped)
+        processedData = result;
         
         // Add validation for the extracted BOL number
         const bolNumber = processedData.shipmentDetails?.bolNumber;
@@ -886,33 +887,7 @@ export async function POST(
         fileName: file.name,
         fileId: uploadStream.id,
         type: 'BOL' as const,
-        items: processedData.containers.map((container, index) => {
-          // Use product.name from Claude's response for the product
-          // and extract packaging from product.description 
-          const productName = container.product.name || ''; // Get product name directly
-          const { product: descriptionProduct, packaging } = extractProductAndPackaging(container.product.description);
-          
-          // Log the fields for debugging
-          console.log(`Container ${index+1} mapping:`, {
-            claudeProductName: container.product.name,
-            claudeProductDescription: container.product.description,
-            extractedProduct: productName || descriptionProduct,
-            extractedPackaging: packaging
-          });
-          
-          return {
-            itemNumber: index + 1,
-            containerNumber: container.containerNumber,
-            seal: container.sealNumber || '',
-            description: container.product.description, // Keep original description
-            product: productName || descriptionProduct, // Prefer the name field, fallback to extracted
-            packaging, // Store extracted packaging
-            quantity: {
-              litros: container.quantity.volume.liters.toFixed(2),
-              kg: container.quantity.weight.kg.toFixed(3)
-            }
-          };
-        }),
+        items: itemsFromExtractedContainers(processedData.containers),
         bolData: {
           bolNumber: processedData.shipmentDetails.bolNumber,
           bookingNumber: processedData.shipmentDetails.bookingNumber || '',
@@ -925,10 +900,18 @@ export async function POST(
           dateOfIssue: processedData.shipmentDetails.dateOfIssue || '',
           totalContainers: processedData.containers.length.toString(),
           totalWeight: {
-            kg: processedData.containers.reduce((sum, container) => 
-              sum + container.quantity.weight.kg, 0).toFixed(3),
-            lbs: processedData.containers.reduce((sum, container) => 
-              sum + container.quantity.weight.lbs, 0).toFixed(2)
+            kg: processedData.containers.reduce((sum, container) => {
+              if (Array.isArray((container as any).lineItems)) {
+                return sum + (container as any).lineItems.reduce((s: number, li: any) => s + (li.weight?.kg || 0), 0);
+              }
+              return sum + (container.quantity?.weight?.kg || 0);
+            }, 0).toFixed(3),
+            lbs: processedData.containers.reduce((sum, container) => {
+              if (Array.isArray((container as any).lineItems)) {
+                return sum + (container as any).lineItems.reduce((s: number, li: any) => s + (li.weight?.lbs || 0), 0);
+              }
+              return sum + (container.quantity?.weight?.lbs || 0);
+            }, 0).toFixed(2)
           }
         }
       }

@@ -5,6 +5,7 @@ import { Document } from '@/models/Document'
 import { Client } from '@/models/Client'
 import { Asset } from '@/models/Asset'
 import { extractProductName, getNextBusinessDay, formatDateFormal, getOrdinalSuffix } from '@/lib/coo-utils'
+import { itemsFromExtractedContainers } from '@/lib/pl-utils'
 import { PDFDocument, rgb, StandardFonts, PDFPage, PDFImage, PDFFont } from 'pdf-lib'
 import mongoose, { Types } from 'mongoose'
 import fs from 'fs'
@@ -1176,28 +1177,33 @@ export async function POST(
       });
     };
 
+    // Derive items from extractedData.containers if items array is empty (older docs)
+    const bolItems = (bolDocument.items && bolDocument.items.length > 0)
+      ? bolDocument.items
+      : itemsFromExtractedContainers(bolDocument.extractedData?.containers);
+
     // Extract container numbers and seals from BOL
     const containers: Array<{containerNumber: string, sealNumber: string}> = [];
-    
-    if (bolDocument.items && bolDocument.items.length > 0) {
-      console.log("BOL Document items dump:", JSON.stringify(bolDocument.items, null, 2));
-      
-      bolDocument.items.forEach((item: any) => {
+
+    if (bolItems.length > 0) {
+      console.log("BOL Document items dump:", JSON.stringify(bolItems, null, 2));
+
+      bolItems.forEach((item: any) => {
         containers.push({
           containerNumber: item.containerNumber,
           sealNumber: item.seal
         });
       });
     } else {
-      console.log("No items found in bolDocument or empty array");
+      console.log("No items found in bolDocument or extractedData");
     }
 
     // Extract unique product descriptions
     const uniqueProducts = new Set<string>();
     const productDebugInfo: any[] = [];
     
-    if (bolDocument.items && bolDocument.items.length > 0) {
-      bolDocument.items.forEach((item: any, index: number) => {
+    if (bolItems.length > 0) {
+      bolItems.forEach((item: any, index: number) => {
         // Debug information
         productDebugInfo.push({
           index,
@@ -1230,10 +1236,10 @@ export async function POST(
     const productLookupOrder = [
       // First check if all items have the same non-empty product field
       () => {
-        if (!bolDocument.items || bolDocument.items.length === 0) return null;
-        
+        if (bolItems.length === 0) return null;
+
         // Filter to only items with a product name
-        const itemsWithProduct = bolDocument.items.filter((item: any) => 
+        const itemsWithProduct = bolItems.filter((item: any) =>
           item.product && typeof item.product === 'string' && item.product.trim() !== ''
         );
         
@@ -1264,10 +1270,10 @@ export async function POST(
       
       // Then try to extract from descriptions if products aren't available
       () => {
-        if (!bolDocument.items || bolDocument.items.length === 0) return null;
-        
+        if (bolItems.length === 0) return null;
+
         // Filter to only items with a description
-        const itemsWithDescription = bolDocument.items.filter((item: any) => 
+        const itemsWithDescription = bolItems.filter((item: any) =>
           item.description && typeof item.description === 'string' && item.description.trim() !== ''
         );
         
@@ -1339,8 +1345,8 @@ export async function POST(
     
     // Create enhanced containers with product information
     const containersWithProducts = [];
-    if (bolDocument.items && bolDocument.items.length > 0) {
-      for (const item of bolDocument.items as Array<{
+    if (bolItems.length > 0) {
+      for (const item of bolItems as Array<{
         containerNumber: string;
         seal: string;
         product?: string;

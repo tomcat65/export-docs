@@ -47,10 +47,28 @@ export interface Party {
   taxId: string;
 }
 
+export interface ContainerLineItem {
+  product: string;        // Clean product name, e.g. "Base Oil Group II 600N"
+  hsCode: string;         // HS Code if available
+  packaging: string;      // Packaging type: "Flexitank", "IBC", "Drum", "Pail", "Barrel", "Tote", "Bulk"
+  packagingQuantity: number; // e.g. 1 for flexitank, 20 for drums, 50 for pails
+  volume: {
+    liters: number;
+    gallons: number;
+  };
+  weight: {
+    kg: number;
+    lbs: number;
+    mt: number;
+  };
+}
+
 export interface Container {
   containerNumber: string;
   sealNumber: string;
   type: string;
+  lineItems: ContainerLineItem[];
+  // Legacy fields kept for backward compatibility with processClaudeResponse
   product: {
     name: string;
     description: string;
@@ -131,8 +149,15 @@ CRITICAL RULES:
   * Use ONLY the number shown in the "Carrier's Reference" field if it exists
   * This is a specific field distinct from the BOL number
   * Leave it as an empty string "" if not found
+- CONTAINERS AND LINE ITEMS:
+  * Create one entry per physical container
+  * Each container has a "lineItems" array with one entry per distinct product/packaging combination
+  * A single container can have multiple line items (e.g., 10 IBC + 20 Drums + 50 Pails)
+  * For "packaging": use EXACTLY one of: "Flexitank", "IBC", "Drum", "Pail", "Barrel", "Tote", "Bulk", or "" if unknown
+  * For "product": use the CLEAN product name only (e.g., "Base Oil Group II 600N"), NOT the packaging description
+  * For "packagingQuantity": the number of packages (1 for a flexitank, 20 for drums, etc.)
+  * Each line item has its own volume and weight for that specific product/packaging
 - Convert measurements to all requested units
-- Create separate entries for each container/item
 - Use empty string "" for missing text fields
 - Use 0 for missing numerical values
 - Preserve exact formatting of numbers, dates, and identifiers
@@ -146,9 +171,11 @@ IMPORTANT: Make sure to:
 1. Read and analyze every page of the document
 2. Combine information that spans across pages
 3. Include ALL containers and their details from ALL pages
-4. For "bolNumber", use ONLY the actual Bill of Lading number (B/L No.)  
+4. For "bolNumber", use ONLY the actual Bill of Lading number (B/L No.)
 5. For "carrierReference", use ONLY the actual Carrier's Reference number if present
-6. Verify totals match the sum of all items across all pages
+6. Each container must have a "lineItems" array — one entry per product/packaging combination in that container
+7. Extract packaging type and quantity separately from the product name (do NOT include packaging in the product name)
+8. Verify totals match the sum of all items across all pages
 
 Return this EXACT JSON structure with the values found:
 {
@@ -183,23 +210,24 @@ Return this EXACT JSON structure with the values found:
     {
       "containerNumber": "",  // Container number from cargo details
       "sealNumber": "",      // Seal number
-      "type": "",           // Container type (e.g., "DRY")
-      "product": {
-        "name": "",         // Product name
-        "description": "",  // Full product description
-        "hsCode": ""       // HS Code if available
-      },
-      "quantity": {
-        "volume": {
-          "liters": 0,     // Convert to liters if needed
-          "gallons": 0     // Convert to gallons if needed
-        },
-        "weight": {
-          "kg": 0,         // Weight in KG
-          "lbs": 0,        // Convert to pounds
-          "mt": 0          // Convert to metric tons
+      "type": "",           // Container type (e.g., "DRY", "20GP", "40HC")
+      "lineItems": [
+        {
+          "product": "",            // Clean product name only (e.g., "Base Oil Group II 600N")
+          "hsCode": "",             // HS Code if available
+          "packaging": "",          // EXACTLY one of: "Flexitank", "IBC", "Drum", "Pail", "Barrel", "Tote", "Bulk", or "" if unknown
+          "packagingQuantity": 0,   // Number of packages (e.g., 1 for flexitank, 20 for drums, 50 for pails)
+          "volume": {
+            "liters": 0,            // Volume in liters
+            "gallons": 0            // Volume in gallons
+          },
+          "weight": {
+            "kg": 0,                // Weight in KG
+            "lbs": 0,               // Weight in pounds
+            "mt": 0                 // Weight in metric tons
+          }
         }
-      }
+      ]
     }
   ],
   "commercial": {

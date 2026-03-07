@@ -64,13 +64,6 @@ export interface ProcessedDocument {
   }
 }
 
-// Define Firebase function response type
-interface FirebaseBolResponse {
-  success: boolean;
-  error?: string;
-  document: ProcessedDocument;
-  storageError?: string;
-}
 
 /**
  * Process a document with Claude AI via Firebase Functions
@@ -95,15 +88,10 @@ export async function processDocumentWithClaude(
       fileName: `document.${document.type === 'pdf' ? 'pdf' : 'jpg'}`, // Default filename
       fileType,
       clientId
-    }) as FirebaseBolResponse;
-    
-    // Check for success and extract document data
-    if (!result.success) {
-      throw new Error(result.error || 'Document processing failed in Firebase');
-    }
-    
-    // Return the processed document
-    return result.document;
+    });
+
+    // processBolWithFirebase returns the document directly (already unwrapped)
+    return result;
   } catch (error: any) {
     console.error('Error in server-side document processing:', error);
     
