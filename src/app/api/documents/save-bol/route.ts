@@ -8,6 +8,15 @@ import mongoose from 'mongoose'
 const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg']
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 
+function normalizeText(text: string): string {
+  if (!text || typeof text !== 'string') return ''
+  return text
+    .toLowerCase()
+    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 /**
  * Lightweight save-only route for BOL documents.
  * Accepts pre-extracted BOL data (from client-side Firebase processing)
@@ -78,15 +87,34 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Client not found' }, { status: 400 })
     }
 
-    // Verify consignee matches the selected client (same logic as upload route)
+    // Verify consignee matches the selected client (mirrors upload route logic)
     if (parties?.consignee?.name) {
-      const normalizedConsignee = parties.consignee.name.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim()
-      const normalizedClient = (client as any).name?.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim()
+      const normalizedConsignee = normalizeText(parties.consignee.name)
+      const normalizedClient = normalizeText((client as any).name || '')
 
       if (normalizedConsignee && normalizedClient) {
-        const isMatch =
-          normalizedConsignee.includes(normalizedClient) ||
-          normalizedClient.includes(normalizedConsignee)
+        let isMatch = normalizedConsignee === normalizedClient
+
+        // Check substring match with ratio guard (same as upload route)
+        if (!isMatch) {
+          const hasSubstring =
+            normalizedConsignee.includes(normalizedClient) ||
+            normalizedClient.includes(normalizedConsignee)
+
+          if (hasSubstring) {
+            const shorterLen = Math.min(normalizedConsignee.length, normalizedClient.length)
+            const longerLen = Math.max(normalizedConsignee.length, normalizedClient.length)
+            // Require shorter string to be at least 50% of longer to avoid false positives
+            isMatch = shorterLen >= longerLen * 0.5
+          }
+        }
+
+        // Check tax ID match as fallback
+        if (!isMatch && parties.consignee.taxId && (client as any).rif) {
+          const normalizedTaxId = normalizeText(parties.consignee.taxId)
+          const normalizedRif = normalizeText((client as any).rif)
+          isMatch = normalizedTaxId === normalizedRif
+        }
 
         if (!isMatch) {
           console.warn(`Client-consignee mismatch: consignee="${parties.consignee.name}" client="${(client as any).name}"`)
