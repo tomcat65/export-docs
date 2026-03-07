@@ -17,6 +17,15 @@ export interface IExtractedContainer {
   volume?: string
   packages?: string
   description?: string
+  product?: {
+    name?: string
+    description?: string
+    hsCode?: string
+  }
+  quantity?: {
+    volume?: { liters?: number; gallons?: number }
+    weight?: { kg?: number; lbs?: number; mt?: number }
+  }
   [key: string]: any
 }
 
@@ -229,6 +238,15 @@ const documentSchema = new mongoose.Schema<IDocument>({
       volume: String,
       packages: String,
       description: String,
+      product: {
+        name: String,
+        description: String,
+        hsCode: String,
+      },
+      quantity: {
+        volume: { liters: Number, gallons: Number },
+        weight: { kg: Number, lbs: Number, mt: Number },
+      },
     }],
     parties: {
       shipper: { name: String, address: String, taxId: String },
