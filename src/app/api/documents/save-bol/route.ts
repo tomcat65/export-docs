@@ -88,7 +88,19 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify consignee matches the selected client (mirrors upload route logic)
-    if (parties?.consignee?.name) {
+    // Reject if consignee data is missing or invalid — don't allow bypass
+    if (!parties?.consignee?.name || typeof parties.consignee.name !== 'string' || parties.consignee.name.trim().length < 3) {
+      console.warn('Missing or invalid consignee name in extracted data:', parties?.consignee)
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Could not verify document ownership: consignee name is missing or invalid in extracted data.',
+        },
+        { status: 400 }
+      )
+    }
+
+    {
       const normalizedConsignee = normalizeText(parties.consignee.name)
       const normalizedClient = normalizeText((client as any).name || '')
 
