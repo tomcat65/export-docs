@@ -148,6 +148,8 @@ export function DocumentUpload({ clientId }: DocumentUploadProps) {
           setFileExists(true);
           setWarningMessage(`A document with BOL number ${extractedDocument.bolNumber} already exists.`);
           setWarningData({ exists: true, document: errorData.existingDocument });
+          setDuplicateDocData(extractedDocument);
+          setDuplicateDocId(errorData.existingDocument?._id || '');
           setIsProcessing(false);
           return;
         }

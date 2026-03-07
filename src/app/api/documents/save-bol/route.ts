@@ -5,6 +5,9 @@ import { Document } from '@/models/Document'
 import { Client } from '@/models/Client'
 import mongoose from 'mongoose'
 
+const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg']
+const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
+
 /**
  * Lightweight save-only route for BOL documents.
  * Accepts pre-extracted BOL data (from client-side Firebase processing)
@@ -12,6 +15,8 @@ import mongoose from 'mongoose'
  * No Claude/Firebase processing — should complete in < 5 seconds.
  */
 export async function POST(request: NextRequest) {
+  let uploadedFileId: mongoose.Types.ObjectId | null = null
+
   try {
     const session = await auth()
     if (!session?.user?.isAdmin) {
@@ -26,6 +31,21 @@ export async function POST(request: NextRequest) {
     if (!file || !clientId || !extractedDataStr) {
       return NextResponse.json(
         { error: 'Missing required fields: file, clientId, extractedData' },
+        { status: 400 }
+      )
+    }
+
+    // Validate file type and size
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      return NextResponse.json(
+        { error: 'File must be a PDF or image (JPEG, PNG)' },
+        { status: 400 }
+      )
+    }
+
+    if (file.size > MAX_FILE_SIZE) {
+      return NextResponse.json(
+        { error: 'File too large. Maximum size is 10MB.' },
         { status: 400 }
       )
     }
@@ -51,6 +71,35 @@ export async function POST(request: NextRequest) {
     console.log('================================')
 
     await connectDB()
+
+    // Validate client exists
+    const client = await Client.findById(clientId).lean()
+    if (!client) {
+      return NextResponse.json({ error: 'Client not found' }, { status: 400 })
+    }
+
+    // Verify consignee matches the selected client (same logic as upload route)
+    if (parties?.consignee?.name) {
+      const normalizedConsignee = parties.consignee.name.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim()
+      const normalizedClient = (client as any).name?.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim()
+
+      if (normalizedConsignee && normalizedClient) {
+        const isMatch =
+          normalizedConsignee.includes(normalizedClient) ||
+          normalizedClient.includes(normalizedConsignee)
+
+        if (!isMatch) {
+          console.warn(`Client-consignee mismatch: consignee="${parties.consignee.name}" client="${(client as any).name}"`)
+          return NextResponse.json(
+            {
+              success: false,
+              error: `This BOL appears to belong to "${parties.consignee.name}", not "${(client as any).name}". Please check the selected client.`,
+            },
+            { status: 400 }
+          )
+        }
+      }
+    }
 
     // Check for existing document with same BOL number
     if (bolNumber) {
@@ -104,6 +153,9 @@ export async function POST(request: NextRequest) {
         .on('finish', resolve)
     })
 
+    // Track the uploaded file ID for cleanup on failure
+    uploadedFileId = uploadStream.id
+
     // Create document record with pre-extracted data
     const newDocument = await Document.create({
       clientId,
@@ -148,6 +200,20 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error('Error in save-bol:', error)
+
+    // Clean up orphaned GridFS file if Document.create failed
+    if (uploadedFileId) {
+      try {
+        const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db!, {
+          bucketName: 'documents',
+        })
+        await bucket.delete(uploadedFileId)
+        console.log(`Cleaned up orphaned GridFS file: ${uploadedFileId}`)
+      } catch (cleanupError) {
+        console.error('Failed to clean up orphaned GridFS file:', cleanupError)
+      }
+    }
+
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to save document' },
       { status: 500 }
