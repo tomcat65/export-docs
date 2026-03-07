@@ -124,118 +124,47 @@ export const processBolWithFirebase = async ({
   fileType: string;
   clientId: string;
 }): Promise<BolDocument> => {
-  // Max retry attempts
-  const MAX_RETRIES = 2;
-  let lastError: any = null;
-  
-  // Add detailed logging at the start
-  console.log(`Starting Firebase function processing for file: ${fileName}`);
-  console.log(`File size: ${Math.round(fileContent.length / 1024)} KB`);
-  console.log(`File type: ${fileType}`);
-  
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      console.log(`Processing document with Firebase (attempt ${attempt + 1}/${MAX_RETRIES + 1})...`);
-      
-      // Get the function reference (lazy-initializes Firebase on first call)
-      const functions = getFirebaseFunctions();
-      const processBolDocument = httpsCallable<any, FirebaseFunctionResult>(functions, 'processBolDocument', {
-        timeout: 540000, // 9 minutes to match function timeout
-      });
+  console.log(`Processing BOL with Firebase: ${fileName} (${Math.round(fileContent.length / 1024)} KB)`);
 
-      // Log function call attempt with timestamp
-      const startTime = Date.now();
-      console.log(`Calling Firebase function at ${new Date().toISOString()}...`);
-      
-      // Call the function
-      const result = await processBolDocument({
-        fileContent,
-        fileName,
-        fileType,
-        clientId,
-      });
-      
-      // Calculate and log processing time
-      const processingTime = (Date.now() - startTime) / 1000;
-      console.log(`Firebase function completed in ${processingTime.toFixed(2)} seconds`);
+  const functions = getFirebaseFunctions();
+  const processBolDocument = httpsCallable<any, FirebaseFunctionResult>(functions, 'processBolDocument', {
+    timeout: 540000, // 9 minutes to match function timeout
+  });
 
-      if (!result.data) {
-        throw new Error('No result returned from Firebase function');
-      }
+  const startTime = Date.now();
+  const result = await processBolDocument({
+    fileContent,
+    fileName,
+    fileType,
+    clientId,
+  });
 
-      if (result.data.success && result.data.document) {
-        const document = result.data.document;
-        
-        // Log successful extraction
-        console.log(`Successfully extracted document data, BOL number: ${document.bolNumber || 'Not found'}`);
-        console.log(`Found ${document.containers?.length || 0} containers in the document`);
-        
-        // Check if the extracted BOL number is in our problematic list
-        if (document.bolNumber && PROBLEMATIC_BOL_NUMBERS.includes(document.bolNumber)) {
-          console.log(`Detected problematic BOL number "${document.bolNumber}" - attempting to fix`);
-          
-          // Try to extract BOL number from filename if possible
-          const fileNameMatch = fileName.match(/\d+/);
-          if (fileNameMatch) {
-            const potentialBolNumber = fileNameMatch[0];
-            console.log(`Extracted potential BOL number "${potentialBolNumber}" from filename`);
-            
-            // Override the BOL number
-            document.bolNumber = potentialBolNumber;
-            
-            // Also update it in shipmentDetails if present
-            if (document.shipmentDetails) {
-              document.shipmentDetails.bolNumber = potentialBolNumber;
-            }
-            
-            console.log(`Successfully fixed BOL number to "${potentialBolNumber}"`);
-          } else {
-            console.warn(`Could not extract BOL number from filename "${fileName}" - leaving as is with warning`);
-          }
+  const processingTime = (Date.now() - startTime) / 1000;
+  console.log(`Firebase function completed in ${processingTime.toFixed(2)} seconds`);
+
+  if (!result.data) {
+    throw new Error('No result returned from Firebase function');
+  }
+
+  if (result.data.success && result.data.document) {
+    const document = result.data.document;
+    console.log(`Extracted BOL: ${document.bolNumber || 'unknown'}, ${document.containers?.length || 0} containers`);
+
+    // Fix known problematic BOL numbers
+    if (document.bolNumber && PROBLEMATIC_BOL_NUMBERS.includes(document.bolNumber)) {
+      const fileNameMatch = fileName.match(/\d+/);
+      if (fileNameMatch) {
+        document.bolNumber = fileNameMatch[0];
+        if (document.shipmentDetails) {
+          document.shipmentDetails.bolNumber = fileNameMatch[0];
         }
-        
-        return document;
-      } else {
-        console.error('Firebase function returned error:', result.data.error);
-        throw new Error(result.data.error || 'Unknown error processing BOL document');
       }
-    } catch (error) {
-      lastError = error;
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error(`Error in processBolWithFirebase (attempt ${attempt + 1}/${MAX_RETRIES + 1}):`, errorMessage);
-      
-      // Log more detailed error information
-      if (error instanceof Error && 'code' in error) {
-        console.error(`Error code: ${(error as any).code}`);
-      }
-      
-      // If this was the last retry, break out
-      if (attempt === MAX_RETRIES) {
-        console.log('All Firebase processing attempts failed');
-        break;
-      }
-      
-      // Wait before retrying (exponential backoff)
-      const waitTime = Math.min(1000 * (2 ** attempt), 10000); // max 10 seconds
-      console.log(`Waiting ${waitTime}ms before retry...`);
-      await new Promise(resolve => setTimeout(resolve, waitTime));
     }
+
+    return document;
   }
-  
-  // If we get here, all retries failed
-  const errorMessage = lastError instanceof Error ? lastError.message : 'Unknown error';
-  console.error('Final error after all retries:', errorMessage);
-  
-  // Provide a more user-friendly error message
-  if (errorMessage.includes('timeout')) {
-    throw new Error('Document processing timed out. The document may be too complex or large.');
-  } else if (errorMessage.includes('not-found')) {
-    throw new Error('The document processing service is not available. Please try again later.');
-  } else if (errorMessage.includes('No result returned')) {
-    throw new Error('The document processing service did not return a result. Please check if your document is valid.');
-  } else {
-    throw new Error(`Error processing BOL document: ${errorMessage}`);
-  }
+
+  throw new Error(result.data.error || 'Unknown error processing BOL document');
 };
 
 /**
