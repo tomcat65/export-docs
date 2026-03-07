@@ -33,6 +33,12 @@
 - Fix: wrap as `{ type: { type: String } }` to tell Mongoose it's a regular field
 - Symptom: `Cast to [string] failed` when trying to save objects in an array
 
+### Don't trust static analysis alone for "dead code"
+- A background subagent grep-searched for references and declared `process-bol/route.ts`, `onDrop`, `isTimeoutError`, `handleUploadError` as dead code
+- Claude-desktop (with runtime context) corrected: `process-bol` is the active Firebase fallback, the functions are actively used
+- Static reference search misses: dynamic imports, indirect calls, fallback paths, future-use patterns
+- Always cross-validate dead code claims with agents that have runtime/architectural context before deleting
+
 ### Codex audit cycle
 - Send code for audit → fix findings → re-audit until no HIGH findings
 - Codex catches: orphan cleanup, bypass paths, enum mismatches, validation gaps

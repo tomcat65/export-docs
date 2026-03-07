@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -39,7 +39,9 @@ export function DocumentUpload({ clientId }: DocumentUploadProps) {
   const [warningMessage, setWarningMessage] = useState('')
   const [warningData, setWarningData] = useState<any>(null)
   const [apiKeyError, setApiKeyError] = useState<boolean>(false)
+  const [showSkipOption, setShowSkipOption] = useState(false)
   const [uploadError, setUploadError] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [debugMode, setDebugMode] = useState(false)
   const [showErrorDialog, setShowErrorDialog] = useState(false)
   const [technicalError, setTechnicalError] = useState('')
@@ -496,6 +498,72 @@ export function DocumentUpload({ clientId }: DocumentUploadProps) {
       }
     }
   }, [warningMessage, warningData, fileExists, toast, duplicateDocId]);
+
+  const onDrop = useCallback(
+    async (acceptedFiles: File[]) => {
+      try {
+        // Reset any previous error state
+        setApiKeyError(false);
+
+        // ... rest of the existing upload logic
+      } catch (error: any) { // Use 'any' type to access properties safely
+        // ... existing error logic
+
+        // Check if this is an API key error
+        const errorDetail = error?.response?.data?.needsNewApiKey ||
+                           (error?.message && error.message.includes('API key')) ||
+                           (error?.message && error.message.includes('authentication'));
+
+        if (errorDetail) {
+          setApiKeyError(true);
+          console.error('Anthropic API Key Error:', error?.response?.data?.message || 'Authentication failed');
+        }
+      }
+    },
+    [setApiKeyError] // Add the dependencies
+  );
+
+  // Add a function to detect and handle timeout errors
+  const isTimeoutError = (error: any): boolean => {
+    const errorMsg = error?.message || '';
+    return (
+      errorMsg.includes('FUNCTION_INVOCATION_TIMEOUT') ||
+      errorMsg.includes('timed out') ||
+      errorMsg.includes('timeout') ||
+      error?.response?.status === 504
+    );
+  };
+
+  // Add improved error handling with focus on Firebase
+  const handleUploadError = (error: any) => {
+    console.error('Upload error details:', {
+      message: error.message,
+      code: error.code,
+      name: error.name,
+      stack: error.stack?.substring(0, 200) // Limit stack trace length
+    });
+
+    if (!currentFile) {
+      setUploadError('Upload failed: No file available');
+      setShowErrorDialog(true);
+      setIsProcessing(false);
+      return;
+    }
+
+    // Use the utility function to analyze the error
+    const { errorType, userMessage, technicalDetails } = analyzeProcessingError(error);
+
+    setUploadError(userMessage);
+    setTechnicalError(technicalDetails);
+    setErrorStatus(errorType);
+
+    // Generate and log diagnostic information
+    const diagnosticInfo = generateDiagnosticInfo(currentFile, error);
+    console.log('Upload error diagnostic information:', diagnosticInfo);
+
+    setShowErrorDialog(true);
+    setIsProcessing(false);
+  };
 
   // Check for BOL number in URL (for debugging purposes)
   useEffect(() => {

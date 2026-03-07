@@ -29,7 +29,7 @@
 
 ### Route cleanup
 - [x] 2.1 Delete BOL processing path from `upload/route.ts` (745→183 lines)
-- [x] 2.2 Delete `process-bol/route.ts` — confirmed unreferenced, removed
+- [x] 2.2 Keep `process-bol/route.ts` — active Firebase fallback (claude-desktop correction)
 
 ### Replace flow fix
 - [x] 2.3 Rewrite `handleReplaceExisting` as soft-delete (PATCH superseded) + save-bol
@@ -43,7 +43,7 @@
 - [x] 2.7 Use `showSuccessAndRedirect()` (router.push) after successful save-bol
 
 ### Cleanup
-- [x] 2.8 Remove dead functions: onDrop, isTimeoutError, handleUploadError, showSkipOption, fileInputRef
+- [x] 2.8 Keep onDrop, isTimeoutError, handleUploadError — actively used (claude-desktop correction)
 - [x] 2.9 Remove manual `createdAt`/`updatedAt` from save-bol + upload route
 
 ### Verification
