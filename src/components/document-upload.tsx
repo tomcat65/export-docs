@@ -47,111 +47,7 @@ export function DocumentUpload({ clientId }: DocumentUploadProps) {
   const [technicalError, setTechnicalError] = useState('')
   const [errorStatus, setErrorStatus] = useState('')
 
-  // Add a function to use our direct API endpoint when Firebase isn't available
-  const processDocumentWithAPI = async (file: File, clientId: string) => {
-    try {
-      setIsProcessing(true);
-      setProgress('Reading file...');
-      
-      // Check file size and type
-      if (file.size > 10 * 1024 * 1024) { // 10MB limit
-        throw new Error('File too large. Please upload a file smaller than 10MB.');
-      }
-      
-      if (!file.type.includes('pdf') && !file.type.includes('image')) {
-        throw new Error('Invalid file type. Only PDF and image files are supported.');
-      }
-      
-      // Convert file to base64
-      const base64Content = await readFileAsBase64(file);
-      
-      setProgress('Processing with API...');
-      
-      // Call our direct API endpoint
-      const response = await fetch('/api/documents/process-bol', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          fileContent: base64Content,
-          fileName: file.name,
-          fileType: file.type,
-          clientId
-        }),
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to process document');
-      }
-      
-      const data = await response.json();
-      
-      setProgress('Processing complete!');
-      
-      // Check for duplicate document
-      if (data.document.bolNumber) {
-        console.log(`Checking if BOL number ${data.document.bolNumber} exists...`);
-        const checkResponse = await fetch(`/api/documents/check-bol/${data.document.bolNumber}`);
-        const checkData = await checkResponse.json();
-        
-        console.log(`BOL check response:`, checkData);
-        
-        if (checkData.exists) {
-          console.log(`BOL ${data.document.bolNumber} exists: ID=${checkData.document?._id}`);
-          setFileExists(true);
-          setWarningMessage(`A document with BOL number ${data.document.bolNumber} already exists.`);
-          setWarningData(checkData);
-          setDuplicateDocData(data.document);
-          setDuplicateDocId(checkData.document?._id);
-          setIsProcessing(false);
-          return;
-        } else {
-          console.log(`BOL ${data.document.bolNumber} does not exist or was previously deleted`);
-        }
-      }
-      
-      // Upload to the regular document endpoint
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('clientId', clientId);
-      formData.append('documentType', 'BOL');
-      
-      setProgress('Saving document...');
-      
-      const uploadResponse = await fetch('/api/documents/upload', {
-        method: 'POST',
-        body: formData
-      });
-      
-      if (!uploadResponse.ok) {
-        const error = await uploadResponse.json();
-        throw new Error(error.error || 'Failed to upload document');
-      }
-      
-      const uploadResult = await uploadResponse.json();
-      
-      // Show success message and redirect
-      toast({
-        title: 'Success',
-        description: 'Document processed successfully',
-        variant: 'default'
-      });
-      
-      // Redirect to the document page
-      router.push(`/dashboard/documents/${uploadResult.document._id}`);
-    } catch (error: any) {
-      console.error('Error processing document with API:', error);
-      setUploadError(error.message || 'Failed to process document');
-      setApiKeyError(error.message?.includes('API key') || false);
-      setShowSkipOption(true);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  // Modify the processDocumentWithFirebase function to try Firebase functions first, then fallback to direct API
+  // Process BOL document: Firebase client-side extraction → lightweight save API
   const processDocumentWithFirebase = async (file: File, clientId: string) => {
     try {
       setIsProcessing(true);
@@ -159,246 +55,127 @@ export function DocumentUpload({ clientId }: DocumentUploadProps) {
       setTechnicalError('');
       setErrorStatus('');
       setProgress('Reading document file...');
-      
+
       // Convert file to base64
       const base64Content = await readFileAsBase64(file);
-      
+
       if (!base64Content) {
         throw new Error('Failed to read file content');
       }
-      
-      // Set up retry mechanism
-      const maxRetries = 2;
-      let retries = 0;
-      let lastError = null;
-      
+
       // Show a more detailed progress message if the file is large
       const fileSizeMB = Math.round(file.size / (1024 * 1024) * 10) / 10;
       if (fileSizeMB > 5) {
         setProgress(`Large file detected (${fileSizeMB}MB). Processing may take several minutes...`);
-        
-        // Add small delay to ensure the UI updates
         await new Promise(resolve => setTimeout(resolve, 300));
       }
-      
-      // Try Firebase functions first
-      let useDirectApi = false;
-      while (retries <= maxRetries) {
-        try {
-          if (useDirectApi) {
-            // Try the direct API endpoint if Firebase function failed
-            setProgress(`Trying direct API processing (attempt ${retries + 1}/${maxRetries + 1})...`);
-            
-            // Call the direct API endpoint
-            const response = await fetch('/api/documents/process-bol', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                fileContent: base64Content,
-                fileName: file.name,
-                fileType: file.type,
-                clientId
-              })
-            });
-            
-            if (!response.ok) {
-              const errorData = await response.json();
-              throw new Error(errorData.error || 'API processing failed');
-            }
-            
-            const apiResult = await response.json();
-            
-            if (apiResult.fallback) {
-              setProgress('Processing complete with limited data (fallback mode)');
-            } else {
-              setProgress('Processing complete!');
-            }
-            
-            // Check for duplicate
-            if (apiResult.duplicate) {
-              console.log(`Firebase detected duplicate BOL: ${apiResult.existingDocument.bolNumber}`);
-              
-              // Double-check with our enhanced check-bol endpoint
-              if (apiResult.existingDocument.bolNumber) {
-                const checkResponse = await fetch(`/api/documents/check-bol/${apiResult.existingDocument.bolNumber}`);
-                const checkData = await checkResponse.json();
-                console.log('Verification check response:', checkData);
-                
-                // Only treat as duplicate if verified by the enhanced check
-                if (checkData.exists) {
-                  setFileExists(true);
-                  setWarningMessage(`A document with BOL number ${apiResult.existingDocument.bolNumber} already exists.`);
-                  setWarningData({ exists: true, document: apiResult.existingDocument });
-                  setIsProcessing(false);
-                  return;
-                } else {
-                  console.log('Duplicate not verified by enhanced check, proceeding with upload...');
-                  // Continue with upload since the duplicate wasn't verified
-                }
-              } else {
-                // Fallback to old behavior if no BOL number
-                setFileExists(true);
-                setWarningMessage(`A document with this BOL number already exists.`);
-                setWarningData({ exists: true, document: apiResult.existingDocument });
-                setIsProcessing(false);
-                return;
-              }
-            }
-            
-            // Refresh to show the new document
-            setProgress('Document saved successfully');
-            router.refresh();
-            
-            // Reset state after a short delay
-            setTimeout(() => {
-              setIsProcessing(false);
-              setProgress('');
-            }, 2000);
-            
-            return;
-          } else {
-            // Import the Firebase client dynamically to avoid SSR issues
-            const { processBolWithFirebase } = await import('@/lib/firebase-client');
-            
-            setProgress(`Processing with Firebase Functions (attempt ${retries + 1}/${maxRetries + 1})...`);
-            
-            // Process the document with Firebase
-            const result = await processBolWithFirebase({
-              fileContent: base64Content,
-              fileName: file.name,
-              fileType: file.type,
-              clientId: clientId
-            });
 
-            // Type the result properly
-            const typedResult = result as {
-              success: boolean;
-              fallback?: boolean;
-              document: {
-                bolNumber: string;
-                fileName: string;
-                fileUrl: string;
-                clientId: string;
-                shipmentDetails: any;
-                parties: any;
-                containers: any;
-                commercial: any;
-              }
-            };
-            
-            if (typedResult.fallback) {
-              setProgress('Processing complete with limited data (fallback mode)');
-            } else {
-              setProgress('Processing complete!');
-            }
-            
-            // Check for duplicate document
-            if (typedResult.document?.bolNumber) {
-              const checkResponse = await fetch(`/api/documents/check-bol/${typedResult.document.bolNumber}`);
-              const checkData = await checkResponse.json();
-              
-              if (checkData.exists) {
-                setFileExists(true);
-                setWarningMessage(`A document with BOL number ${typedResult.document.bolNumber} already exists.`);
-                setWarningData(checkData);
-                setDuplicateDocData(typedResult.document);
-                setDuplicateDocId(checkData.document._id);
-                setIsProcessing(false);
-                return;
-              }
-            }
-            
-            // Upload to the regular document endpoint
-            const formData = new FormData();
-            formData.append('file', file);
-            formData.append('clientId', clientId);
-            formData.append('documentType', 'BOL');
-            
-            // We only include the BOL number if we have it (could be fallback mode)
-            if (typedResult.document?.bolNumber) {
-              formData.append('bolNumber', typedResult.document.bolNumber);
-            }
-            
-            setProgress('Saving document...');
-            
-            const uploadResponse = await fetch('/api/documents/upload', {
-              method: 'POST',
-              body: formData
-            });
-            
-            if (!uploadResponse.ok) {
-              const errorData = await uploadResponse.json();
-              
-              // If we get a duplicate error here, handle it specially
-              if (errorData.error?.includes('duplicate')) {
-                const bolNumber = typedResult.document?.bolNumber || 'unknown';
-                setFileExists(true);
-                setWarningMessage(`A document with BOL number ${bolNumber} already exists.`);
-                setWarningData({
-                  exists: true,
-                  document: { bolNumber }
-                });
-                setIsProcessing(false);
-                return;
-              }
-              
-              throw new Error(errorData.error || 'Failed to upload processed document');
-            }
-            
-            // Success!
-            setProgress('Document saved successfully');
-            router.refresh();
-            
-            // Reset state after a short delay
-            setTimeout(() => {
-              setIsProcessing(false);
-              setProgress('');
-            }, 2000);
-            
-            return;
-          }
+      // Step 1: Process with Firebase directly from the client (no Vercel timeout)
+      const maxRetries = 2;
+      let lastError: any = null;
+      let extractedDocument: any = null;
+
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          const { processBolWithFirebase } = await import('@/lib/firebase-client');
+
+          setProgress(`Processing with Firebase Functions (attempt ${attempt + 1}/${maxRetries + 1})...`);
+
+          extractedDocument = await processBolWithFirebase({
+            fileContent: base64Content,
+            fileName: file.name,
+            fileType: file.type,
+            clientId: clientId
+          });
+
+          setProgress('Processing complete!');
+          break; // Success — exit retry loop
         } catch (error: any) {
-          console.error(`Attempt ${retries + 1} failed:`, error);
-          setProgress(`Error in attempt ${retries + 1}: ${error.message}`);
+          console.error(`Firebase attempt ${attempt + 1} failed:`, error);
           lastError = error;
-          
-          // If this was a Firebase attempt and it failed, try direct API next
-          if (!useDirectApi) {
-            useDirectApi = true;
-            setProgress('Firebase processing failed, trying direct API...');
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            continue; // Skip the retry counter increment to try the API method
-          }
-          
-          // If this isn't the last attempt, wait before retrying
-          if (retries < maxRetries) {
-            const backoffTime = (retries + 1) * 2000;
-            setProgress(`Retrying in ${backoffTime/1000} seconds...`);
+
+          if (attempt < maxRetries) {
+            const backoffTime = (attempt + 1) * 2000;
+            setProgress(`Retrying in ${backoffTime / 1000} seconds...`);
             await new Promise(resolve => setTimeout(resolve, backoffTime));
           }
-          
-          retries++;
         }
       }
-      
-      // If we reached here, all retries failed
-      throw lastError || new Error('Failed to process document after multiple attempts');
+
+      if (!extractedDocument) {
+        throw lastError || new Error('Failed to process document with Firebase');
+      }
+
+      // Step 2: Check for duplicate BOL
+      if (extractedDocument.bolNumber) {
+        const checkResponse = await fetch(`/api/documents/check-bol/${extractedDocument.bolNumber}`);
+        const checkData = await checkResponse.json();
+
+        if (checkData.exists) {
+          setFileExists(true);
+          setWarningMessage(`A document with BOL number ${extractedDocument.bolNumber} already exists.`);
+          setWarningData(checkData);
+          setDuplicateDocData(extractedDocument);
+          setDuplicateDocId(checkData.document._id);
+          setIsProcessing(false);
+          return;
+        }
+      }
+
+      // Step 3: Save file + extracted data via lightweight API (no processing, fast)
+      setProgress('Saving document...');
+
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('clientId', clientId);
+      formData.append('extractedData', JSON.stringify({
+        bolNumber: extractedDocument.bolNumber,
+        shipmentDetails: extractedDocument.shipmentDetails,
+        parties: extractedDocument.parties,
+        containers: extractedDocument.containers,
+        commercial: extractedDocument.commercial,
+      }));
+
+      const saveResponse = await fetch('/api/documents/save-bol', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!saveResponse.ok) {
+        const errorData = await saveResponse.json();
+
+        if (errorData.duplicate) {
+          setFileExists(true);
+          setWarningMessage(`A document with BOL number ${extractedDocument.bolNumber} already exists.`);
+          setWarningData({ exists: true, document: errorData.existingDocument });
+          setIsProcessing(false);
+          return;
+        }
+
+        throw new Error(errorData.error || 'Failed to save document');
+      }
+
+      // Success!
+      setProgress('Document saved successfully');
+      router.refresh();
+
+      setTimeout(() => {
+        setIsProcessing(false);
+        setProgress('');
+      }, 2000);
+
     } catch (error: any) {
       console.error('Document processing error:', error);
-      
-      // Use the utility function to analyze the error
+
       const { errorType, userMessage, technicalDetails } = analyzeProcessingError(error);
-      
+
       setUploadError(userMessage);
       setTechnicalError(technicalDetails);
       setErrorStatus(errorType);
-      
-      // Generate and log diagnostic information
+
       const diagnosticInfo = generateDiagnosticInfo(file, error);
       console.log('Document processing diagnostic information:', diagnosticInfo);
-      
+
       setIsProcessing(false);
       setProgress('');
       setShowErrorDialog(true);
