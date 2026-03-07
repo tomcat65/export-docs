@@ -185,12 +185,13 @@ export async function POST(request: NextRequest) {
     uploadedFileId = uploadStream.id
 
     // Create document record with pre-extracted data
+    // Note: schema enum for status is ['active', 'superseded']
     const newDocument = await Document.create({
       clientId,
       fileName: file.name,
       fileId: uploadStream.id,
       type: 'BOL',
-      status: 'processed',
+      status: 'active',
       bolData: {
         bolNumber: bolNumber || 'unidentified',
         bookingNumber: shipmentDetails?.bookingNumber || '',
@@ -222,7 +223,7 @@ export async function POST(request: NextRequest) {
         fileName: newDocument.fileName,
         type: newDocument.type,
         bolNumber,
-        status: 'processed',
+        status: 'active',
         clientId,
       },
     })
