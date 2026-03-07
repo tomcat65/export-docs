@@ -1,9 +1,48 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { connectDB } from '@/lib/db'
-import { Document } from '@/models/Document'
+import { Document, VALID_STATUSES } from '@/models/Document'
 import { Client } from '@/models/Client'
 import mongoose from 'mongoose'
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const session = await auth()
+    if (!session?.user?.isAdmin) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    await connectDB()
+    const { id } = await params
+    const body = await request.json()
+
+    if (!body.status || !VALID_STATUSES.includes(body.status)) {
+      return NextResponse.json(
+        { error: `Invalid status. Must be one of: ${VALID_STATUSES.join(', ')}` },
+        { status: 400 }
+      )
+    }
+
+    const document = await Document.findById(id)
+    if (!document) {
+      return NextResponse.json({ error: 'Document not found' }, { status: 404 })
+    }
+
+    document.status = body.status
+    if (body.status === 'superseded' && body.supersededBy) {
+      document.supersededBy = new mongoose.Types.ObjectId(body.supersededBy)
+    }
+    await document.save()
+
+    return NextResponse.json({ success: true, status: document.status })
+  } catch (error) {
+    console.error('Error updating document:', error)
+    return NextResponse.json({ error: 'Failed to update document' }, { status: 500 })
+  }
+}
 
 export async function DELETE(
   request: NextRequest,

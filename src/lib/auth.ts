@@ -16,9 +16,7 @@ export const authOptions = {
       clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
       authorization: {
         params: {
-          redirect_uri: process.env.NODE_ENV === 'production' 
-            ? 'https://www.txwos-docs.fyi/api/auth/callback/google'
-            : 'http://localhost:3000/api/auth/callback/google'
+          redirect_uri: `${process.env.NEXTAUTH_URL}/api/auth/callback/google`
         }
       }
     })

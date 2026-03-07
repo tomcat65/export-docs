@@ -141,11 +141,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Check for existing document with same BOL number
+    // Check for existing active document with same BOL number
     if (bolNumber) {
       const existing = await Document.findOne({
         'bolData.bolNumber': bolNumber,
         type: 'BOL',
+        status: { $nin: ['superseded', 'error', 'duplicate'] },
       })
       if (existing) {
         return NextResponse.json(
@@ -197,7 +198,6 @@ export async function POST(request: NextRequest) {
     uploadedFileId = uploadStream.id
 
     // Create document record with pre-extracted data
-    // Note: schema enum for status is ['active', 'superseded']
     const newDocument = await Document.create({
       clientId,
       fileName: file.name,
@@ -222,8 +222,6 @@ export async function POST(request: NextRequest) {
         parties: parties || {},
         commercial: commercial || {},
       },
-      createdAt: new Date(),
-      updatedAt: new Date(),
     })
 
     console.log(`Document saved: ${newDocument._id} (BOL: ${bolNumber})`)

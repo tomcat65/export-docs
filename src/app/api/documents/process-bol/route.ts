@@ -130,14 +130,19 @@ export async function POST(request: NextRequest) {
       };
     }
     
-    // Now result should have a 'document' object with at least a bolNumber
+    // processBolWithFirebase returns the document object directly
+    // Wrap in { document: ... } if needed for backward compat
+    if (result && !result.document) {
+      result = { success: true, document: result };
+    }
     const bolNumber = result.document.bolNumber;
     console.log(`Document processed successfully, BOL number: ${bolNumber}`);
     
     // Check if this BOL number already exists
     const existingBol = await Document.findOne({
       'bolData.bolNumber': bolNumber,
-      type: 'BOL'
+      type: 'BOL',
+      status: { $nin: ['superseded', 'error', 'duplicate'] },
     });
     
     if (existingBol) {

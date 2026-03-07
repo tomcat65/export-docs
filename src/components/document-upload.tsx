@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -39,9 +39,7 @@ export function DocumentUpload({ clientId }: DocumentUploadProps) {
   const [warningMessage, setWarningMessage] = useState('')
   const [warningData, setWarningData] = useState<any>(null)
   const [apiKeyError, setApiKeyError] = useState<boolean>(false)
-  const [showSkipOption, setShowSkipOption] = useState(false)
   const [uploadError, setUploadError] = useState('')
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const [debugMode, setDebugMode] = useState(false)
   const [showErrorDialog, setShowErrorDialog] = useState(false)
   const [technicalError, setTechnicalError] = useState('')
@@ -157,14 +155,8 @@ export function DocumentUpload({ clientId }: DocumentUploadProps) {
         throw new Error(errorData.error || 'Failed to save document');
       }
 
-      // Success!
-      setProgress('Document saved successfully');
-      router.refresh();
-
-      setTimeout(() => {
-        setIsProcessing(false);
-        setProgress('');
-      }, 2000);
+      // Success — redirect to client page
+      showSuccessAndRedirect();
 
     } catch (error: any) {
       console.error('Document processing error:', error);
@@ -217,137 +209,78 @@ export function DocumentUpload({ clientId }: DocumentUploadProps) {
     processDocumentWithFirebase(file, clientId);
   }
 
-  // Separate handler for the replace functionality
+  // Replace existing document: soft-delete old (set superseded) + save new via save-bol
   const handleReplaceExisting = async () => {
-    if (!currentFile) {
+    if (!currentFile || !duplicateDocId || !duplicateDocData) {
       toast({
         title: 'Error',
-        description: 'The file is no longer available. Please try uploading again.',
+        description: !currentFile
+          ? 'The file is no longer available. Please try uploading again.'
+          : 'No duplicate document data found.',
         variant: 'destructive'
       });
       return;
     }
-    
-    if (!duplicateDocId) {
-      toast({
-        title: 'Error',
-        description: 'No duplicate document ID found.',
-        variant: 'destructive'
-      });
-      return;
-    }
-    
+
     try {
       setIsProcessing(true);
-      setProgress('Processing document for replacement...');
-      
-      // First, explicitly delete the existing document
-      console.log('Deleting existing document before replacement:', duplicateDocId);
-      setProgress('Deleting existing document...');
-      
-      const deleteResponse = await fetch(`/api/documents/${duplicateDocId}`, {
-        method: 'DELETE',
+
+      // Step 1: Soft-delete the existing document (mark as superseded)
+      setProgress('Marking existing document as superseded...');
+      const supersededResponse = await fetch(`/api/documents/${duplicateDocId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'superseded' }),
       });
-      
-      if (!deleteResponse.ok) {
-        const deleteError = await deleteResponse.json();
-        console.warn('Warning: Could not delete existing document:', deleteError.error || 'Unknown error');
-        // Continue anyway, as we might be dealing with a document that doesn't exist in the database
-      } else {
-        const deleteResult = await deleteResponse.json();
-        console.log('Document deletion result:', deleteResult);
-        
-        // Add a small delay to ensure the deletion is processed
-        await new Promise(resolve => setTimeout(resolve, 500));
+
+      if (!supersededResponse.ok) {
+        console.warn('Could not mark existing document as superseded');
       }
-      
-      // Now, read the file as base64 to include the data
-      const reader = new FileReader();
-      
-      reader.onload = async (e) => {
-        try {
-          const base64String = e.target?.result?.toString();
-          
-          if (!base64String) {
-            throw new Error('Failed to read file as base64');
-          }
-          
-          setProgress('Extracting data from document...');
-          
-          const formData = new FormData();
-          formData.append('file', currentFile);
-          
-          // Add document data including the base64 content to avoid Claude processing errors
-          const documentData = {
-            type: currentFile.type.startsWith('image/') ? 'image' : 'pdf',
-            data: base64String,
-            overwriteExisting: true,
-            existingDocumentId: duplicateDocId,
-            forceExtract: true // Tell the server to re-extract all data including carrier reference
-          };
-          
-          formData.append('document', JSON.stringify(documentData));
-          
-          setProgress('Uploading replacement document...');
-          
-          // Make the upload request
-          const response = await fetch(`/api/clients/${clientId}/documents/upload`, {
-            method: 'POST',
-            body: formData
-          });
-          
-          const data = await response.json();
-          
-          if (data.success) {
-            toast({
-              title: 'Success',
-              description: 'Document successfully replaced with updated data.',
-              variant: 'default',
-            });
-            
-            // Clear warning state
-            setWarningMessage('');
-            setWarningData(null);
-            
-            // Redirect to document view
-            showSuccessAndRedirect();
-          } else {
-            toast({
-              title: 'Error',
-              description: data.error || 'Failed to replace document.',
-              variant: 'destructive',
-            });
-          }
-        } catch (error) {
-          console.error('Error replacing document:', error);
+
+      // Step 2: Save the new document via save-bol
+      setProgress('Saving replacement document...');
+      const formData = new FormData();
+      formData.append('file', currentFile);
+      formData.append('clientId', clientId);
+      formData.append('extractedData', JSON.stringify({
+        bolNumber: duplicateDocData.bolNumber,
+        shipmentDetails: duplicateDocData.shipmentDetails,
+        parties: duplicateDocData.parties,
+        containers: duplicateDocData.containers,
+        commercial: duplicateDocData.commercial,
+      }));
+
+      const saveResponse = await fetch('/api/documents/save-bol', {
+        method: 'POST',
+        body: formData
+      });
+
+      const saveData = await saveResponse.json();
+
+      if (!saveResponse.ok) {
+        // If save-bol returns duplicate (because the old doc wasn't fully superseded yet),
+        // that's expected — the BOL number check runs before status filter
+        if (saveData.duplicate) {
           toast({
-            title: 'Error',
-            description: 'An error occurred while replacing the document.',
-            variant: 'destructive',
+            title: 'Info',
+            description: 'Document was already replaced.',
+            variant: 'default',
           });
-        } finally {
-          setIsProcessing(false);
-          setProgress('');
+        } else {
+          throw new Error(saveData.error || 'Failed to save replacement document');
         }
-      };
-      
-      reader.onerror = () => {
-        toast({
-          title: 'Error',
-          description: 'Failed to read file',
-          variant: 'destructive'
-        });
-        setIsProcessing(false);
-        setProgress('');
-      };
-      
-      // Start reading the file
-      reader.readAsDataURL(currentFile);
+      }
+
+      // Clear warning state and redirect
+      setWarningMessage('');
+      setWarningData(null);
+      setFileExists(false);
+      showSuccessAndRedirect();
     } catch (error) {
-      console.error('Error processing document for replacement:', error);
+      console.error('Error replacing document:', error);
       toast({
         title: 'Error',
-        description: 'An error occurred while preparing the document for replacement.',
+        description: error instanceof Error ? error.message : 'An error occurred while replacing the document.',
         variant: 'destructive',
       });
       setIsProcessing(false);
@@ -563,72 +496,6 @@ export function DocumentUpload({ clientId }: DocumentUploadProps) {
       }
     }
   }, [warningMessage, warningData, fileExists, toast, duplicateDocId]);
-
-  const onDrop = useCallback(
-    async (acceptedFiles: File[]) => {
-      try {
-        // Reset any previous error state
-        setApiKeyError(false);
-        
-        // ... rest of the existing upload logic
-      } catch (error: any) { // Use 'any' type to access properties safely
-        // ... existing error logic
-        
-        // Check if this is an API key error
-        const errorDetail = error?.response?.data?.needsNewApiKey || 
-                           (error?.message && error.message.includes('API key')) ||
-                           (error?.message && error.message.includes('authentication'));
-        
-        if (errorDetail) {
-          setApiKeyError(true);
-          console.error('Anthropic API Key Error:', error?.response?.data?.message || 'Authentication failed');
-        }
-      }
-    },
-    [setApiKeyError] // Add the dependencies
-  );
-  
-  // Add a function to detect and handle timeout errors
-  const isTimeoutError = (error: any): boolean => {
-    const errorMsg = error?.message || '';
-    return (
-      errorMsg.includes('FUNCTION_INVOCATION_TIMEOUT') ||
-      errorMsg.includes('timed out') ||
-      errorMsg.includes('timeout') ||
-      error?.response?.status === 504
-    );
-  };
-
-  // Add improved error handling with focus on Firebase
-  const handleUploadError = (error: any) => {
-    console.error('Upload error details:', {
-      message: error.message,
-      code: error.code,
-      name: error.name,
-      stack: error.stack?.substring(0, 200) // Limit stack trace length
-    });
-    
-    if (!currentFile) {
-      setUploadError('Upload failed: No file available');
-      setShowErrorDialog(true);
-      setIsProcessing(false);
-      return;
-    }
-    
-    // Use the utility function to analyze the error
-    const { errorType, userMessage, technicalDetails } = analyzeProcessingError(error);
-    
-    setUploadError(userMessage);
-    setTechnicalError(technicalDetails);
-    setErrorStatus(errorType);
-    
-    // Generate and log diagnostic information
-    const diagnosticInfo = generateDiagnosticInfo(currentFile, error);
-    console.log('Upload error diagnostic information:', diagnosticInfo);
-    
-    setShowErrorDialog(true);
-    setIsProcessing(false);
-  };
 
   // Check for BOL number in URL (for debugging purposes)
   useEffect(() => {
