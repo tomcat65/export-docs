@@ -25,16 +25,18 @@ Turn the `mongodb_backup` Firestore mirror into a genuine DR fallback via schema
    - `pre`/`post` on `findOneAndUpdate`, `updateOne`, `findOneAndDelete`. Mongoose 8 aliases `findByIdAndUpdate` → `findOneAndUpdate` and `findByIdAndDelete` → `findOneAndDelete` automatically — covered.
    - Use `this.getFilter()` / `this.getUpdate()` in query middleware; for post-image, issue an explicit `Model.findOne(this.getFilter())` after the update.
    - Future guardrails: middleware stubs for `insertMany` / `bulkWrite` (no current hot paths, fail-closed safety net).
-2. **Diff-aware sync with strict ordering.** Every mirror write path runs **pre-check → chunk writes (new `fileId`) → Firestore transaction → cleanup (old `fileId`)** inside the hook:
+2. **Diff-aware sync with fileId-scoped chunk keys and version gating.** Every mirror write path runs **pre-check → chunk writes (new `fileId` prefix) → Firestore transaction → cleanup** inside the hook:
    - **Pre-check**: read existing `mongodb_backup/current/{collection}/{docId}` Firestore doc. If `existing._syncVersion >= incoming._syncVersion`, return immediately (stale arrival, zero writes, no cleanup — prevents delete-then-resurrect orphan leak).
-   - **Chunk writes**: if `hasFiles: true` and `fileId` changed (or on create), write new Storage chunks under `backups/current/{docId}/chunks/` addressed by new `fileId`. New chunks never collide with old.
+   - **Chunk writes**: if `hasFiles: true` and `fileId` changed (or on create), write new Storage chunks under `backups/current/{docId}/{fileId}/chunks/{n}.bin`. Concurrent rotations for the same `docId` do **not** share object names; `fileId` is part of the key, not just metadata.
    - **Firestore transaction**: `db.runTransaction(async tx => { const snap = await tx.get(ref); if (snap.exists && snap.data()._syncVersion >= incoming._syncVersion) return; tx.set(ref, incoming); })`. Last-writer-wins enforced by the transaction, not by pre-check alone. Pre-check narrows the race window; the transaction closes it.
-   - **Cleanup**: if `fileId` rotated and the transaction succeeded, call `cleanupStaleFileId()` to delete old Firestore `*.files` doc + all Storage chunks under old `fileId`. Skipped if pre-check or transaction determined this arrival was stale.
-   - Non-negotiable — without strict ordering + version gating, `current/` drifts permanently on every PL/COO regeneration or file replacement, or suffers out-of-order overwrite on concurrent saves.
-3. **`_syncVersion` monotonic field.** Every mirror doc carries `_syncVersion` as a top-level Firestore field. Source: `doc.updatedAt.getTime()` if the schema has `timestamps: true`, else `Date.now()` captured at the top of the hook (before any await). Monotonic per-docId; compared numerically in pre-check + transaction.
+   - **Cleanup**:
+     - If the transaction succeeded and `fileId` rotated, call `cleanupStaleFileId()` to delete the old Firestore `*.files` doc + the old chunk prefix `backups/current/{docId}/{oldFileId}/chunks/`.
+     - If new chunks were written but the transaction returned `'stale'` or threw before commit, best-effort delete the just-written loser prefix `backups/current/{docId}/{newFileId}/chunks/` before returning / logging failure.
+   - Non-negotiable — without fileId-scoped chunk keys plus version gating, `current/` can drift permanently on every PL/COO regeneration or file replacement, or suffer blob corruption on concurrent rotations.
+3. **`_syncVersion` ordering token.** Every mirror doc carries `_syncVersion` as a top-level Firestore field. Source is the Mongoose-managed `updatedAt.getTime()` on the saved / post-image document for all four mirrored models. `AdminUser` is brought onto `timestamps: true` so it participates in the same mechanism. This is an app-clock ordering token, not Atlas commit order; pre-check + transaction enforce ordering against that token, and the preview real-Firebase probe is the correctness gate for equal-ms / clock-skew residuals.
 4. **Admin SDK from Next.js runtime** via Vercel env vars (`FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, `FIREBASE_STORAGE_BUCKET`). Assembled via `admin.credential.cert()` at init. `FIREBASE_PRIVATE_KEY` is stored escaped and MUST be decoded with `.replace(/\\n/g, '\n')` at init (Vercel env var newline footgun). Separate from the local `scripts/backup/service-account-key.json` used only by manual scripts.
 5. **Rolling `current/` mirror**: `mongodb_backup/current/{collection}/{docId}` in Firestore. Overwritten only when incoming `_syncVersion` strictly exceeds stored (per item 2). Reflects latest MongoDB state at the moment of the last transaction that won version comparison.
-6. **Firebase Storage for binary chunks**: `backups/current/{docId}/chunks/{n}.bin` in bucket `docu-parse.firebasestorage.app` (location **US-EAST1** — verified existing, retained per Tommy's decision). Storage rules deny-all; Admin SDK bypasses.
+6. **Firebase Storage for binary chunks**: `backups/current/{docId}/{fileId}/chunks/{n}.bin` in bucket `docu-parse.firebasestorage.app` (location **US-EAST1** — verified existing, retained per Tommy's decision). Storage rules deny-all; Admin SDK bypasses.
 7. **Weekly PIT snapshots on Firebase scheduled Functions Gen 2** (not Vercel cron): `functions/src/scheduled/backupSnapshot.ts` co-located in the existing `functions/` codebase (same `firebase deploy --only functions` handles both BOL extraction + scheduled backup). Runs Sunday 03:00 America/Chicago, `timeZone: 'America/Chicago'`, `timeoutSeconds: 1800`, `retryCount: 1`, `memory: '512MiB'`, `secrets: [defineSecret('MONGODB_URI')]`. Writes `mongodb_backup/{YYYY-MM-DD}/...` + `backups/{YYYY-MM-DD}/...`. Retention: **keep the last 8 dated snapshots** (exclude `current/` from ordering) via `recursiveDelete` wrapped in try/catch → `retention_failures` collection for partial-failure tracking. `/api/health` Vercel cron stays as-is.
 8. **`backupfailures` MongoDB collection** captures silent hook failures (`collection`, `docId`, `operation`, `error`, `stack?`, `retryCount`, `elapsedMs?`, `createdAt`). Retention is **90-day TTL + best-effort soft cap at 1000 rows** (non-atomic `countDocuments` + oldest-N `deleteMany` may overshoot under concurrent burst, acceptable — TTL is the real bound). Canonical collection name: `backupfailures` (Mongoose auto-pluralization of `BackupFailure`).
 9. **Restore script local-only**: `scripts/backup/firestore-to-mongodb.cjs`, Admin SDK + local service account key. Target URI validated via **parsed URI** (not substring): `mongodb-connection-string-url` or equivalent parses the URI; hostname and dbname both checked against independent allowlists. Explicit `dbName: 'docu-export'` **overridden** per target in the allowlist (not relied on from URI). Never runs in production.
@@ -54,7 +56,7 @@ Carries forward everything from v1 investigation plus new facts from v2 bootstra
 - GridFS scale (from `backups/2026-04-21/`): 75 documents + 75 `documents.files` + 240 `documents.chunks`, 2 clients, 4 admin users, 6 assets + 6 `assets.files`. ~53 MB per full metadata+chunks snapshot. 8-week retention → ≈425 MB steady-state (trivially below Spark free tier).
 - Existing Vercel cron (`vercel.json`): `{ "path": "/api/health", "schedule": "0 0 * * 0" }` with `Authorization: Bearer <CRON_SECRET>` pattern. Stays unchanged.
 - `firebase-admin@^13.7.0` is in root `devDependencies` — **must be promoted to `dependencies` for Next.js runtime** (Phase 1 pre-req). `functions/package.json` has its own copy; unaffected.
-- Mongoose model surface: `Document.ts`, `Client.ts`, `Asset.ts`, `AdminUser.ts` — four targets. `SystemStatus.ts` + `BackupFailure` excluded from plugin (infra metadata; hooking them would loop).
+- Mongoose model surface: `Document.ts`, `Client.ts`, `Asset.ts`, `AdminUser.ts` — four targets. All four are assumed to expose Mongoose-managed `updatedAt`; `AdminUser` therefore needs `timestamps: true` before Phase 3 flips on. `SystemStatus.ts` + `BackupFailure` are excluded from plugin (infra metadata; hooking them would loop).
 
 ### From v2 investigation (2026-04-21)
 
@@ -100,8 +102,8 @@ Neither pure sync-in-hook nor pure best-effort is workable:
 Locked v3 posture:
 
 - Hooks are `async`, awaited by Mongoose 8 (per official docs, `async post('save', fn)` with <2 params IS awaited). No `setImmediate` hack, no cancel mechanic.
-- Hook captures `_syncVersion = doc.updatedAt?.getTime() ?? Date.now()` at the top, before any await. Monotonic per-docId because Mongoose `timestamps: true` + Atlas wall clock are monotonic-enough at save granularity.
-- Hook body runs **pre-check → chunk writes (new `fileId` only) → Firestore `runTransaction` → cleanup (old `fileId` only)** in strict order. Any step that reads `existing._syncVersion >= incoming._syncVersion` short-circuits with a no-op return (stale arrival).
+- Hook captures `_syncVersion = doc.updatedAt.getTime()` after Mongoose timestamps have been applied. This is an app-clock ordering token, so the preview real-Firebase probe remains the correctness gate for equal-ms / skew residuals.
+- Hook body runs **pre-check → chunk writes to `backups/current/{docId}/{fileId}/chunks/{n}.bin` → Firestore `runTransaction` → cleanup** in order. Any step that reads `existing._syncVersion >= incoming._syncVersion` short-circuits with a no-op return (stale arrival). If chunks were written before the stale result, the hook deletes the loser prefix before returning.
 - Hook body is wrapped in `try { … } catch (err) { await recordBackupFailure({ collection, docId, operation, error: err.message, stack: err.stack, elapsedMs }) }`. Hook **never throws** — primary save always returns 200.
 - `setTimeout(() => recordBackupFailure({ type: 'backup_slow', docId, elapsed_ms: 500 }), 500)` wraps the hook body and clears on completion. This logs slow backups without affecting control flow. Telemetry, not cancel.
 - Weekly PIT snapshot is the authoritative recovery primitive; it reconciles any row in `backupfailures` (drift, slow, error) within 7 days (RPO for failed syncs = 7 days; successful syncs are synchronous).
@@ -157,15 +159,16 @@ Pre-requisite plumbing. No app behavior change yet. `BACKUP_ENABLED` defaults fa
 Reusable write/cleanup primitives consumed by the plugin and the weekly Function.
 
 - [ ] 008: `src/lib/firebase-backup.ts` exports:
-  - `mirrorDocument(doc, collection, syncVersion, snapshotId): Promise<'written' | 'stale'>` — single entry point for the hot path. Runs the strict pre-check → Firestore `runTransaction` sequence for `mongodb_backup/{snapshotId}/{collection}/{docId}`. Adds `_syncVersion` to the written payload. Returns `'stale'` if pre-check or transaction determined this arrival lost. Internal: uses ported `cleanForFirestore` (same transforms as `upload-to-firestore.cjs:128-151`).
+  - `mirrorDocument(doc, collection, syncVersion, snapshotId): Promise<'written' | 'stale'>` — single entry point for the hot path. Runs the pre-check → Firestore `runTransaction` sequence for `mongodb_backup/{snapshotId}/{collection}/{docId}`. Adds `_syncVersion` to the written payload. Returns `'stale'` if pre-check or transaction determined this arrival lost. Internal: uses ported `cleanForFirestore` (same transforms as `upload-to-firestore.cjs:128-151`).
   - `mirrorFilesDoc(filesDoc, collection, syncVersion, snapshotId): Promise<'written' | 'stale'>` — same version-gated pattern for `documents.files` / `assets.files` siblings.
-  - `writeChunks(docId, fileId, chunks, snapshotId): Promise<void>` — writes `bucket.file(path).save(bytes, { resumable: false, contentType: 'application/octet-stream', metadata: { metadata: { fileId } } })` per chunk at `backups/{snapshotId}/{docId}/chunks/{n}.bin`. Caller decides when to invoke (only on create or `fileId` rotation).
-  - `cleanupStaleFileId(docId, oldFileId, collection, snapshotId): Promise<void>` — deletes old Firestore `*.files` docs + all Storage chunks under `backups/{snapshotId}/{docId}/chunks/` whose metadata.fileId matches `oldFileId`. Non-negotiable (R13). Caller invokes ONLY after the Firestore transaction succeeded on a rotation; never on stale arrivals.
+  - `writeChunks(docId, fileId, chunks, snapshotId): Promise<void>` — writes `bucket.file(path).save(bytes, { resumable: false, contentType: 'application/octet-stream' })` per chunk at `backups/{snapshotId}/{docId}/{fileId}/chunks/{n}.bin`. Caller decides when to invoke (only on create or `fileId` rotation).
+  - `deleteChunkPrefix(docId, fileId, snapshotId): Promise<void>` — deletes the entire prefix `backups/{snapshotId}/{docId}/{fileId}/chunks/`. Used both for old-file cleanup after a winning rotation and for best-effort loser-prefix cleanup after a stale / failed transaction.
+  - `cleanupStaleFileId(docId, oldFileId, collection, snapshotId): Promise<void>` — deletes old Firestore `*.files` docs + `deleteChunkPrefix(docId, oldFileId, snapshotId)`. Non-negotiable (R13). Caller invokes ONLY after the Firestore transaction succeeded on a rotation.
   - `recordBackupFailure(entry: { collection, docId, operation, error, stack?, elapsedMs? }): Promise<void>` — inserts into `BackupFailure` model, then best-effort soft-cap prune (if `countDocuments() > 1000`, delete oldest N; non-atomic, may overshoot under concurrent burst — TTL is the real bound).
   - For PIT snapshot mode (`snapshotId = YYYY-MM-DD`), version-gating is skipped — dated snapshots are immutable writes.
 - [ ] 009: TS types co-located. `tests/firebase-backup.test.ts` — mock `admin.firestore`, `admin.storage` via vitest module mocks. Do NOT hit real Firebase in unit tests.
 - AC:
-  - Test coverage: successful write path, stale-arrival returns `'stale'` (no writes, no cleanup), rotation path (chunks write → transaction → cleanup order asserted), failure path invoking `recordBackupFailure`, `Timestamp.fromDate()` translation of `Date`, `__v → _v` rename, `cleanupStaleFileId` deletes exactly matching old chunks and leaves new chunks untouched, PIT snapshot mode skips version gating.
+  - Test coverage: successful write path, stale-arrival returns `'stale'` (no mirror write; any prewritten loser prefix is deleted), rotation path (chunks write → transaction → cleanup order asserted), failure path invoking `recordBackupFailure`, `Timestamp.fromDate()` translation of `Date`, `__v → _v` rename, `cleanupStaleFileId` deletes exactly the old fileId prefix and leaves the winning fileId prefix untouched, PIT snapshot mode skips version gating.
   - 246 existing tests still pass; new tests pass.
 - Verify:
   - `npx vitest run tests/firebase-backup.test.ts --reporter=verbose`
@@ -182,7 +185,7 @@ The DR coverage surface. Behavior gated by env var so Phase 3 merges dark.
 - [ ] 011: Add `src/lib/backup-plugin.ts` — a Mongoose plugin: `backupPlugin(schema, { collection, hasFiles })` where `hasFiles: true` enables `fileId` rotation logic (Document, Asset). Installs:
   - `schema.post('save', async function(doc) { ... })` — create + save coverage.
   - `schema.pre('findOneAndUpdate', async function() { if (hasFiles) this._backup_pre = await this.model.findOne(this.getFilter()).lean(); })` — captures pre-image when file rotation is possible.
-  - `schema.post('findOneAndUpdate', async function() { ... })` — re-fetches post-image via `this.model.findOne(this.getFilter()).lean()`, drives the full Hybrid-C sequence (pre-check → chunks if rotation → transaction → cleanup if rotation).
+  - `schema.post('findOneAndUpdate', async function() { ... })` — re-fetches post-image via `this.model.findOne(this.getFilter()).lean()`, drives the full Hybrid-C sequence (pre-check → chunks to fileId-scoped prefix if rotation → transaction → cleanup).
   - Same pattern for `updateOne`.
   - `schema.pre('findOneAndDelete', async function() { this._backup_pre = await this.model.findOne(this.getFilter()).lean(); })`.
   - `schema.post('findOneAndDelete', async function() { ... })` — pre-check on delete (`syncVersion = Date.now()`), then transactional delete of mirror doc + sibling files doc + cleanup of all chunks under pre.fileId.
@@ -195,8 +198,9 @@ The DR coverage surface. Behavior gated by env var so Phase 3 merges dark.
       recordBackupFailure({ collection, docId, operation: 'slow', error: 'exceeded 500ms', elapsedMs: 500 }).catch(() => {});
     }, 500);
     try {
-      const syncVersion = doc.updatedAt?.getTime() ?? Date.now();
-      // Hybrid C sequence: pre-check → chunks (rotation) → runTransaction → cleanup (rotation)
+      const syncVersion = doc.updatedAt.getTime();
+      // Hybrid C sequence: pre-check → chunks to fileId-scoped prefix (rotation) → runTransaction → cleanup
+      // If chunks were written but the transaction returns stale / throws, delete the new-fileId prefix before returning / logging failure.
       // ... see implementation sketch in Phase 2.008 helpers
     } catch (err) {
       await recordBackupFailure({ collection, docId, operation, error: err.message, stack: err.stack, elapsedMs: Date.now() - started });
@@ -208,9 +212,9 @@ The DR coverage surface. Behavior gated by env var so Phase 3 merges dark.
 - [ ] 012: Apply plugin in `src/models/Document.ts` with `hasFiles: true`, `Client.ts` with `hasFiles: false`, `Asset.ts` with `hasFiles: true`, `AdminUser.ts` with `hasFiles: false`. `SystemStatus.ts` + `BackupFailure` get NO plugin (prevents write loops).
 - [ ] 013: Integration test at `tests/backup-plugin.test.ts` — uses `mongodb-memory-server` (verify presence; add as devDep if not), mocks `firebase-admin`, exercises:
   - `.save()` mirrors correctly + writes `_syncVersion`.
-  - `findByIdAndUpdate` (aliases to `findOneAndUpdate`) triggers both pre + post hooks; `fileId` rotation: chunks written BEFORE transaction, cleanup runs AFTER transaction success.
+  - `findByIdAndUpdate` (aliases to `findOneAndUpdate`) triggers both pre + post hooks; `fileId` rotation: chunks written to a fileId-scoped prefix BEFORE transaction, old prefix cleanup runs AFTER transaction success, loser prefix cleanup runs on stale / failed transaction.
   - `findByIdAndDelete` (aliases to `findOneAndDelete`) removes mirror doc + files + chunks.
-  - **Concurrent-write test (R15)**: fire two `.save()` operations for the same docId with different `updatedAt`; assert only the later `_syncVersion` persists in the mirror, the earlier one returns `'stale'` with zero mirror state changes.
+  - **Concurrent-write test (R15)**: fire two `.save()` operations for the same docId with different `updatedAt`; assert only the later `_syncVersion` persists in the mirror, the earlier one returns `'stale'`, and the loser fileId prefix is deleted.
   - **Stale-arrival test**: manually seed mirror with `_syncVersion = X+1`, run hook with `syncVersion = X`; assert no writes, no cleanup, no chunks touched.
   - **Cleanup-failure test (R16)**: mock `cleanupStaleFileId` to throw after transaction success; assert mirror Firestore doc is consistent, `backupfailures` row appears, save returns successfully.
   - Hook error in transaction → `recordBackupFailure` called, save returns successfully.
@@ -219,7 +223,7 @@ The DR coverage surface. Behavior gated by env var so Phase 3 merges dark.
 - AC:
   - With `BACKUP_ENABLED=false`, 246 existing tests green; `.save()` latency unchanged.
   - With `BACKUP_ENABLED=true`, all new integration tests green.
-  - Vercel preview deploy with `BACKUP_ENABLED=true` + real Firebase (probe testing only, not prod): concurrent-write test against the mirror via sequential fetch of `.doc().get()._syncVersion` shows monotonic increase matching save order.
+  - Vercel preview deploy with `BACKUP_ENABLED=true` + real Firebase (probe testing only, not prod): concurrent-write test against the mirror via sequential fetch of `.doc().get()._syncVersion` shows mirror ordering consistent with save order. This preview probe is the correctness gate; local mocks only validate orchestration.
 - Verify:
   - `BACKUP_ENABLED=false npx vitest run`
   - `BACKUP_ENABLED=true npx vitest run tests/backup-plugin.test.ts`
@@ -228,9 +232,9 @@ The DR coverage surface. Behavior gated by env var so Phase 3 merges dark.
   - R3 mitigation: no cancel mechanic; hook awaits full chain at Firebase's natural latency. Bounded by Firebase p95 (~300–400 ms projected Vercel us-east1).
   - R4 mitigation: `try/catch` at outermost hook level — errors never escape.
   - R12 mitigation: query middleware covers all seven flagged write call sites structurally.
-  - R13 mitigation: strict-ordered chunks-before-transaction-before-cleanup; cleanup skipped on stale arrivals.
-  - R15 mitigation: `_syncVersion` pre-check + `runTransaction` last-writer-wins; concurrent-write test in AC.
-  - R16 mitigation: cleanup failure after transaction success → `backupfailures` row + weekly PIT heals orphan chunks.
+  - R13 mitigation: fileId-scoped chunk keys prevent concurrent rotations from sharing blob names; cleanup only removes the old winning prefix.
+  - R15 mitigation: `_syncVersion` pre-check + `runTransaction` ordering token; preview real-Firebase concurrent-write probe in AC is the correctness gate.
+  - R16 mitigation: if a stale / failed transaction happens after new chunks were written, delete the loser prefix best-effort and record failure on cleanup miss.
 - Rollback: set `BACKUP_ENABLED=false` in Vercel (instant, zero-deploy); or revert plugin file + model `.plugin()` calls.
 
 ### Phase 4 — Failure surfacing
@@ -274,7 +278,7 @@ Self-healing authoritative DR primitive. Co-located in existing `functions/` cod
     // connect, iterate, write to dated paths, then retention cleanup
   });
   ```
-  Body: connect to Atlas using the secret, iterate the four target collections + GridFS sibling files + chunks, stream each to `mongodb_backup/{YYYY-MM-DD}/{collection}/{docId}` + `backups/{YYYY-MM-DD}/{docId}/chunks/{n}.bin`. Uses helpers from Phase 2 (`mirrorDocument`/`mirrorFilesDoc`/`writeChunks`) in PIT-snapshot mode (version-gating skipped for dated snapshots).
+  Body: connect to Atlas using the secret, iterate the four target collections + GridFS sibling files + chunks, stream each to `mongodb_backup/{YYYY-MM-DD}/{collection}/{docId}` + `backups/{YYYY-MM-DD}/{docId}/{fileId}/chunks/{n}.bin`. Uses helpers from Phase 2 (`mirrorDocument`/`mirrorFilesDoc`/`writeChunks`) in PIT-snapshot mode (version-gating skipped for dated snapshots).
 - [ ] 018: Export `backupSnapshot` from `functions/src/index.ts` so the existing `firebase deploy --only functions` picks it up alongside current BOL-extraction functions.
 - [ ] 019: **Retention cleanup** at end of function run. Delete everything **older than the 8th most recent dated snapshot**. Implementation:
   - List direct subdocs of `mongodb_backup/` via Admin SDK (parent-doc + date-named subcollections).
@@ -282,7 +286,7 @@ Self-healing authoritative DR primitive. Co-located in existing `functions/` cod
   - For each stale date, wrap `recursiveDelete` with retry + failure tracking:
     ```ts
     try {
-      await db.recursiveDelete(db.collection(`mongodb_backup/${date}`));
+      await db.recursiveDelete(db.doc(`mongodb_backup/${date}`));
       await bucket.deleteFiles({ prefix: `backups/${date}/`, force: true });
     } catch (err) {
       await db.collection('retention_failures').add({
@@ -342,7 +346,7 @@ One command to reconstruct MongoDB from Firestore + Storage.
     - **Recursive ObjectId restoration**: walk `Schema.paths` for each Mongoose model. For every path with `instance === 'ObjectId'`, wrap the string value via `new mongoose.Types.ObjectId(str)`. Includes nested subdocuments (recurse into `Subdocument.schema.paths`) and array fields (recurse per-element). Concrete paths for this codebase: `Document._id`, `Document.clientId`, `Document.fileId`, `Document.relatedBolId`, `Document.supersededBy`, `Asset._id`, `Asset.fileId`, `AdminUser._id`, `Client._id`, plus any discovered via schema walk.
     - Skipped-in-Firestore `[binary-in-local-backup]` placeholder → error (restore fallback is Storage chunk stream, not the Firestore marker).
   - Per-collection ordering: `adminusers`, `clients`, `assets`, `assets.files`, `assets.chunks` (streamed), `documents`, `documents.files`, `documents.chunks` (streamed).
-  - Chunk streaming: `bucket.file('backups/{date}/{docId}/chunks/{n}.bin').download()` → `db.collection('documents.chunks').insertOne({ files_id, n, data: Buffer })`.
+  - Chunk streaming: for each restored owner doc (`Asset` / `Document`), use owner `_id` plus its `fileId` to download `bucket.file('backups/{date}/{ownerDocId}/{fileId}/chunks/{n}.bin')` and reinsert chunk docs with `files_id: fileId`.
 - [ ] 023: `scripts/backup/verify-restore.cjs` (gitignored) — diff: per-collection `count`, sha256 of 10 % sampled `documents.chunks` and `assets.chunks` vs source local backup dump, ObjectId-type assertions per restored collection (`assert(doc.clientId instanceof mongoose.Types.ObjectId)`).
 - [ ] 024: Runbook entry: restore command, required env, allowlisted hosts + dbnames.
 - AC:
@@ -366,7 +370,7 @@ One-time manual population of `current/` + Storage. Resolved decision #3: accept
 
 - [ ] 025: Tommy runs: `node scripts/backup/backup-to-json.cjs` → dumps current MongoDB to `backups/{today}/`. Site stays live. Writes during this window reach Atlas normally but are not yet mirrored.
 - [ ] 026: Tommy runs (adjusted): `node scripts/backup/upload-to-firestore.cjs --snapshot=current` (flag addition — minor patch to existing script to override date-based default path with `current`).
-- [ ] 027: Tommy runs new `scripts/backup/upload-chunks-to-storage.cjs --snapshot=current` (gitignored) — bulk uploads chunks from local dump to `backups/current/{docId}/chunks/*.bin`.
+- [ ] 027: Tommy runs new `scripts/backup/upload-chunks-to-storage.cjs --snapshot=current` (gitignored) — bulk uploads chunks from local dump to `backups/current/{docId}/{fileId}/chunks/*.bin`.
 - [ ] 028: Verify Firestore + Storage `current/` state matches source dump (`node scripts/backup/verify-restore.cjs --source=backups/{today} --firestore=current`).
 - [ ] 029: Flip `BACKUP_ENABLED=true` in Vercel env vars. Redeploy. Any writes between dump creation and flag-flip are **reconciled by the first weekly PIT** (RPO for that window < 7 days).
 - [ ] 030: Monitor `backupfailures` for 30 min. Non-zero row count at T+30 min is expected only for transient Firebase errors on new writes, not for bootstrap-window drift.
@@ -437,10 +441,10 @@ Real restore + app regression.
 | R10 | Firebase Storage bill runaway (bug writes loop) | LOW | MEDIUM | Billing alert at $5 on docu-parse; 8-week retention in Phase 5; `BackupFailure` model has NO plugin (loop blocker) | Low |
 | R11 | Firestore hot-key contention on `current/` doc keys | LOW | LOW | Per-doc keys distributed via ObjectId; not a Firestore pattern concern < 1 write/sec per doc | Zero in practice |
 | R12 | Query-write bypass of post-save hooks | RESIDUAL | HIGH | Query middleware on `findOneAndUpdate`, `updateOne`, `findOneAndDelete` + Mongoose alias coverage for `findByIdAnd*`; stubs for `insertMany` / `bulkWrite` route to `recordBackupFailure({operation: 'unsupported'})` fail-closed | Low |
-| R13 | Stale `*.files` + Storage chunks on `fileId` rotation | RESIDUAL | HIGH | Strict-ordered sequence: chunks-written → transaction → cleanup-old; cleanup runs ONLY after transaction success; stale arrivals skip cleanup entirely (no delete-then-resurrect) | Low (tested in Phase 2 + 3 AC) |
+| R13 | Stale `*.files` + Storage chunks on `fileId` rotation | RESIDUAL | HIGH | FileId-scoped chunk keys prevent concurrent rotations from sharing object names; winning transaction cleans old prefix only; stale / failed arrivals delete their own new prefix best-effort | Low (tested in Phase 2 + 3 AC) |
 | R14 | Restore type corruption if `cleanForFirestore` transforms not reversed | RESIDUAL | HIGH | Phase 6 AC: reverse `Timestamp → Date`, `_v → __v`, recursive `ObjectId` conversion across `Schema.paths`; Mongoose model `validateSync()` + `instanceof` assertions on restored docs | Low (tested in Phase 8) |
-| R15 | Out-of-order mirror writes if `_syncVersion` / pre-check / transaction logic is incorrect or omitted | LOW | HIGH | Phase 3 AC concurrent-write test; `_syncVersion` captured pre-await; `runTransaction` with read-compare-write is last-writer-wins under Firestore's serializable isolation | Low (tested in Phase 3 AC) |
-| R16 | Orphaned Storage chunks if `cleanupStaleFileId` fails after Firestore transaction succeeded | LOW | MEDIUM | Cleanup failure after transaction → `recordBackupFailure({operation: 'cleanup'})`; weekly PIT full dump re-establishes ground truth (dated snapshots are immutable and independent); `retention_failures` tracks partial `recursiveDelete` fallout from PIT retention | Low |
+| R15 | Out-of-order mirror writes if `_syncVersion` / pre-check / transaction logic is incorrect or omitted | LOW | HIGH | Phase 3 AC concurrent-write test; preview real-Firebase probe is the correctness gate because `_syncVersion` is app-clock-derived rather than Atlas commit order; `runTransaction` still serializes by that token | Low with probe validation |
+| R16 | Orphaned Storage prefixes if loser-prefix cleanup or old-prefix cleanup fails | LOW | MEDIUM | FileId-scoped chunk keys bound the blast radius to a single fileId prefix; stale / failed arrivals delete their own prefix best-effort and log on miss; winning rotations log cleanup failures for old prefixes | Low |
 
 ## Rollback strategy (overall)
 

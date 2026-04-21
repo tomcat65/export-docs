@@ -19,6 +19,8 @@ const AdminUserSchema = new mongoose.Schema({
   lastLogin: {
     type: Date
   }
+}, {
+  timestamps: true
 })
 
-export const AdminUser = mongoose.models.AdminUser || mongoose.model('AdminUser', AdminUserSchema) 
+export const AdminUser = mongoose.models.AdminUser || mongoose.model('AdminUser', AdminUserSchema)
