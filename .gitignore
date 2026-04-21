@@ -48,4 +48,8 @@ next-env.d.ts
 /scripts/*
 !/scripts/archive/
 
+# service account keys — never commit (defense-in-depth over /scripts/* rule)
+scripts/backup/service-account-key.json
+*.service-account*.json
+
 coo-sample.*
