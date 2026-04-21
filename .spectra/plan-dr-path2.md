@@ -353,8 +353,8 @@ One command to reconstruct MongoDB from Firestore + Storage.
   - `--dry-run` against `--date=2026-04-21 --target-uri=mongodb://localhost:27017/docu-export-drtest` prints expected insert counts matching the 2026-04-21 dump header.
   - Live restore to `mongodb://localhost:27017/docu-export-drtest` produces byte-identical chunks (sha256 match on random 10 % sample) and doc counts matching source per collection.
   - **ObjectId roundtrip**: `assert(restored.clientId instanceof mongoose.Types.ObjectId)` passes for at least one instance of each ObjectId-typed schema path.
-  - Rejecting prod SRV: `node scripts/backup/firestore-to-mongodb.cjs --target-uri=mongodb+srv://user:pass@cluster0.4lyb9.mongodb.net/docu-export --date=current` exits non-zero with `SRV URIs not allowed`.
-  - Rejecting prod host in non-SRV form: `mongodb://user:pass@cluster0.4lyb9.mongodb.net:27017/docu-export` → exits with `host not allowed`.
+  - Rejecting prod SRV: `node scripts/backup/firestore-to-mongodb.cjs --target-uri=mongodb+srv://user:pass@cluster0.xxxxx.mongodb.net/docu-export --date=current` exits non-zero with `SRV URIs not allowed`.
+  - Rejecting prod host in non-SRV form: `mongodb://user:pass@cluster0.xxxxx.mongodb.net:27017/docu-export` → exits with `host not allowed`.
   - Rejecting wrong dbname on allowed host: `mongodb://localhost:27017/docu-export` → exits with `db name not allowed` (because `docu-export` is not in the allowlist; only `*-drtest` / `*-restore-test` are).
   - Type round-trip: Mongoose model validation passes on restored docs (`Document.findOne({}).then(doc => doc.validateSync())` returns undefined).
 - Verify:
@@ -410,7 +410,7 @@ Real restore + app regression.
 
 ### Phase 9 — Hygiene + credential sweep
 
-- [ ] 036: `scripts/backup/backup-database.js` — replace hardcoded `mongodb+srv://...:...@cluster0.4lyb9.mongodb.net/...` default with `throw new Error('MONGODB_URI env var required')` when unset. File stays gitignored; still worth closing the credentials-in-source surface.
+- [ ] 036: `scripts/backup/backup-database.js` — replace hardcoded `mongodb+srv://...:...@cluster0.xxxxx.mongodb.net/...` default with `throw new Error('MONGODB_URI env var required')` when unset. File stays gitignored; still worth closing the credentials-in-source surface.
 - [ ] 037: `scripts/backup/backup-to-json.cjs:13-14` — same fix: remove hardcoded fallback URI.
 - [ ] 038: `.spectra/dr-runbook.md` — commit to main (NOT gitignored — operational docs). Contents: restore command + allowlist rules, SA key rotation (yearly), Firebase Storage bucket region (US-EAST1 lock-in), `backupfailures` monitoring, `retention_failures` monitoring (weekly check), bootstrap drift expectations, "what to do when weekly cron fails 2× in a row" (check Function logs, rotate key if auth errors, page Tommy on 3rd failure).
 - [ ] 039: Flag for separate task (explicitly NOT fixed here): BOM / UTF-16 artifact at line 1 of `backup-database.js`. File runs but is visually garbled. Tracked in runbook as known-issue.
