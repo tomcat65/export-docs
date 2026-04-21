@@ -20,11 +20,20 @@ function init(): admin.app.App | null {
   const storageBucket = process.env.FIREBASE_STORAGE_BUCKET
 
   if (!projectId || !clientEmail || !privateKeyRaw || !storageBucket) {
-    // Tests that don't mock this module should be able to import it
-    // without crashing — callers that actually touch `db` / `bucket`
-    // without mocking will hit a runtime NPE, which is the intended
-    // fail-loud behavior.
-    if (process.env.NODE_ENV === 'test') return null
+    // Import-time no-op contexts:
+    //   - NODE_ENV==='test': unit tests that don't mock the module.
+    //   - NEXT_PHASE==='phase-production-build': `next build` evaluates
+    //     route modules to collect page data; env vars aren't present
+    //     at build time on Vercel for server-only vars.
+    // Callers that touch `db`/`bucket` at request time without env
+    // vars configured will hit a runtime NPE via the undefined cast,
+    // which the probe route + future hooks surface as a 500.
+    if (
+      process.env.NODE_ENV === 'test' ||
+      process.env.NEXT_PHASE === 'phase-production-build'
+    ) {
+      return null
+    }
 
     const missing = [
       !projectId && 'FIREBASE_PROJECT_ID',
