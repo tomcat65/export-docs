@@ -515,4 +515,34 @@ describe('recordBackupFailure', () => {
     ).resolves.toBeUndefined()
     expect(mocks.mongoCollection.insertOne).toHaveBeenCalledTimes(1)
   })
+
+  it('swallows insertOne rejection, logs via console.error, returns undefined', async () => {
+    mocks.mongoCollection.insertOne.mockRejectedValueOnce(new Error('atlas-blip'))
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await expect(
+        recordBackupFailure({
+          collection: 'documents',
+          docId: 'insert-fail',
+          operation: 'save',
+          error: 'primary',
+        }),
+      ).resolves.toBeUndefined()
+      expect(consoleSpy).toHaveBeenCalledTimes(1)
+      expect(consoleSpy).toHaveBeenCalledWith(
+        'recordBackupFailure: failed to insert failure log',
+        expect.objectContaining({
+          collection: 'documents',
+          docId: 'insert-fail',
+          operation: 'save',
+          insertErrorMessage: 'atlas-blip',
+        }),
+      )
+      // Soft-cap prune must NOT run when insert failed.
+      expect(mocks.mongoCollection.countDocuments).not.toHaveBeenCalled()
+      expect(mocks.mongoCollection.deleteMany).not.toHaveBeenCalled()
+    } finally {
+      consoleSpy.mockRestore()
+    }
+  })
 })

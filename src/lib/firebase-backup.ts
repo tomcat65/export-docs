@@ -293,16 +293,31 @@ export async function recordBackupFailure(entry: BackupFailureEntry): Promise<vo
     return
   }
   const coll = conn.db.collection('backupfailures')
-  await coll.insertOne({
-    collection: entry.collection,
-    docId: entry.docId,
-    operation: entry.operation,
-    error: entry.error,
-    stack: entry.stack,
-    retryCount: entry.retryCount ?? 0,
-    elapsedMs: entry.elapsedMs,
-    createdAt: new Date(),
-  })
+  try {
+    await coll.insertOne({
+      collection: entry.collection,
+      docId: entry.docId,
+      operation: entry.operation,
+      error: entry.error,
+      stack: entry.stack,
+      retryCount: entry.retryCount ?? 0,
+      elapsedMs: entry.elapsedMs,
+      createdAt: new Date(),
+    })
+  } catch (insertErr) {
+    // Never rethrow — the Phase 3 hook contract is "never throws". If the
+    // backupfailures collection itself is unavailable (Atlas blip, auth
+    // rotation), log via console.error so operators see the miss in
+    // Vercel runtime logs. PIT weekly snapshot remains the recovery
+    // primitive. No stack / entry payload body — keep the log small.
+    console.error('recordBackupFailure: failed to insert failure log', {
+      collection: entry.collection,
+      docId: entry.docId,
+      operation: entry.operation,
+      insertErrorMessage: (insertErr as Error)?.message,
+    })
+    return
+  }
 
   // Best-effort soft cap. Failures here are non-fatal (TTL bounds growth).
   try {
